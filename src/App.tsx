@@ -1,0 +1,112 @@
+import React, { useEffect } from 'react';
+import { CommandPalette } from './components/CommandPalette';
+import { ConsensusCoreCanvas } from './components/ConsensusCoreCanvas';
+import { InspectorDrawer } from './components/InspectorDrawer';
+import { LedgerRibbon } from './components/LedgerRibbon';
+import { LiveTxFeed } from './components/LiveTxFeed';
+import { NodeOpsDeck } from './components/NodeOpsDeck';
+import { SidebarNav } from './components/SidebarNav';
+import { TokenExplorer } from './components/TokenExplorer';
+import { TopHudBar } from './components/TopHudBar';
+import { TxParticleRiver } from './components/TxParticleRiver';
+import { ValidatorDeck } from './components/ValidatorDeck';
+import { ValidatorGlobe3D } from './components/ValidatorGlobe3D';
+import { getXrplBridge } from './services/xrplBridge';
+import { useCommandStore } from './store/useCommandStore';
+
+export const App: React.FC = () => {
+  const activeTab = useCommandStore((s) => s.activeTab);
+  const nodeAutoPoll = useCommandStore((s) => s.nodeAutoPoll);
+
+  // Wire live XRPL stream listeners & initial metadata fetch
+  useEffect(() => {
+    const bridge = getXrplBridge();
+    const store = useCommandStore.getState();
+
+    const unsubs = [
+      bridge.onStreamStatus((st) => useCommandStore.getState().ingestStreamStatus(st)),
+      bridge.onLedgerClosed((l) => useCommandStore.getState().ingestLedger(l)),
+      bridge.onTransaction((tx) => useCommandStore.getState().ingestTransaction(tx)),
+      bridge.onValidation((v) => useCommandStore.getState().ingestValidation(v)),
+      bridge.onConsensusPhase((p) => useCommandStore.getState().ingestConsensusPhase(p)),
+    ];
+
+    void bridge.getStreamStatus().then((st) => {
+      useCommandStore.getState().ingestStreamStatus(st);
+      if (!bridge.isElectron && !st.connected) {
+        void bridge.connectNetwork('mainnet');
+      }
+    });
+
+    void store.refreshValidators();
+    void store.refreshTokens();
+
+    return () => {
+      for (const u of unsubs) u();
+    };
+  }, []);
+
+  // Optional 5-second auto-polling for user's own rippled / Clio node
+  useEffect(() => {
+    if (!nodeAutoPoll) return;
+    void useCommandStore.getState().pollOwnNode();
+    const timer = setInterval(() => {
+      void useCommandStore.getState().pollOwnNode();
+    }, 5_000);
+    return () => clearInterval(timer);
+  }, [nodeAutoPoll]);
+
+  // Global keyboard shortcuts (Ctrl+K / Cmd+K and Escape)
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        const st = useCommandStore.getState();
+        st.setCommandPaletteOpen(!st.commandPaletteOpen);
+      } else if (e.key === 'Escape') {
+        const st = useCommandStore.getState();
+        if (st.commandPaletteOpen) st.setCommandPaletteOpen(false);
+        else if (st.inspectorOpen) st.closeInspector();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  return (
+    <div className="h-screen w-screen flex flex-col hud-grid-bg text-slate-100 overflow-hidden">
+      <TopHudBar />
+
+      <div className="flex-1 flex min-h-0">
+        <SidebarNav />
+
+        <main className="flex-1 min-w-0 overflow-y-auto p-4">
+          {activeTab === 'command' && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
+                <div className="xl:col-span-5">
+                  <ConsensusCoreCanvas />
+                </div>
+                <div className="xl:col-span-7">
+                  <TxParticleRiver />
+                </div>
+              </div>
+              <LedgerRibbon />
+              <LiveTxFeed />
+            </div>
+          )}
+
+          {activeTab === 'globe' && <ValidatorGlobe3D />}
+          {activeTab === 'validators' && <ValidatorDeck />}
+          {activeTab === 'tokens' && <TokenExplorer />}
+          {activeTab === 'nodeops' && <NodeOpsDeck />}
+        </main>
+      </div>
+
+      <InspectorDrawer />
+      <CommandPalette />
+    </div>
+  );
+};
+
+export default App;

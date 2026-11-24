@@ -1,0 +1,46 @@
+appId: com.xrpl.command-center
+productName: XRPL Command Center
+copyright: Copyright © 2026 XRPL Command Center Contributors
+directories:
+  output: release
+  buildResources: build
+files:
+  - dist/**/*
+  - dist-electron/**/*
+  - package.json
+extraResources:
+  - from: build/icon.png
+    to: icon.png
+asar: true
+compression: normal
+linux:
+  category: Network;Development;Utility
+  icon: build/icon.png
+  target:
+    - target: AppImage
+      arch:
+        - x64
+  artifactName: XRPL-Command-Center-${version}-linux-${arch}.${ext}
+win:
+  icon: build/icon.png
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: portable
+      arch:
+        - x64
+  artifactName: XRPL-Command-Center-${version}-win-${arch}-${target}.${ext}
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+mac:
+  category: public.app-category.developer-tools
+  icon: build/icon.png
+  target:
+    - target: dmg
+      arch:
+        - arm64
+        - x64
+  artifactName: XRPL-Command-Center-${version}-mac-${arch}.${ext}

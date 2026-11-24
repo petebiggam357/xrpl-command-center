@@ -1,0 +1,53 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+    width: 100%;
+    background-color: #040811;
+    color: #e2e8f0;
+  }
+}
+
+.hud-grid-bg {
+  background-color: #040811;
+  background-image:
+    radial-gradient(circle at 18% 12%, rgba(34, 211, 238, 0.08), transparent 36%),
+    radial-gradient(circle at 82% 85%, rgba(167, 139, 250, 0.07), transparent 40%),
+    linear-gradient(rgba(56, 189, 248, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(56, 189, 248, 0.03) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 100%, 36px 36px, 36px 36px;
+}
+
+.hud-panel {
+  background: linear-gradient(180deg, rgba(13, 22, 40, 0.9) 0%, rgba(7, 13, 26, 0.94) 100%);
+  border: 1px solid rgba(56, 189, 248, 0.16);
+  box-shadow: 0 10px 30px rgba(2, 6, 23, 0.55);
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Sleek dark HUD scrollbars */
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(6, 12, 24, 0.65);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(56, 189, 248, 0.25);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(56, 211, 238, 0.45);
+}

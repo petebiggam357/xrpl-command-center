@@ -1,0 +1,287 @@
+import { NETWORK_PRESETS } from '../shared/networks';
+import type {
+  ConsensusPhase,
+  DesktopNotificationPayload,
+  InspectorResult,
+  LedgerSnapshot,
+  LiveTransaction,
+  NetworkId,
+  NodeConnectionConfig,
+  NodeOpsSnapshot,
+  StreamStatus,
+  TokenOnLedgerReport,
+  TokenRecord,
+  TopologyNode,
+  ValidationPulse,
+  ValidatorRecord,
+  XrplDesktopApi,
+} from '../shared/types';
+import {
+  decodeCurrencyCode,
+  decodeIssuerRiskFlags,
+  detectQueryKind,
+  dropsToXrpNumber,
+  dropsToXrpString,
+  parseLiveTransactionEvent,
+  rippleTimeToUnixMs,
+} from '../shared/xrplCodec';
+
+type Listener<T> = (payload: T) => void;
+
+/**
+ * Browser fallback bridge used only when previewing the renderer via `vite` outside Electron.
+ * Inside Electron (.AppImage / .exe / .dmg), all calls go through `window.xrplApi`.
+ */
+class BrowserFallbackBridge {
+  private ws: WebSocket | null = null;
+  private statusListeners = new Set<Listener<StreamStatus>>();
+  private ledgerListeners = new Set<Listener<LedgerSnapshot>>();
+  private txListeners = new Set<Listener<LiveTransaction>>();
+  private valListeners = new Set<Listener<ValidationPulse>>();
+  private phaseListeners = new Set<Listener<ConsensusPhase>>();
+  private pending = new Map<number, { resolve: (v: Record<string, unknown>) => void; reject: (e: Error) => void }>();
+  private seq = 1;
+  private status: StreamStatus = {
+    connected: false,
+    connecting: false,
+    networkId: 'mainnet',
+    endpoint: NETWORK_PRESETS.mainnet.endpoints[0],
+    latencyMs: null,
+    serverLoadFactor: 1,
+    consensusPhase: 'open',
+  };
+
+  private emitStatus(patch: Partial<StreamStatus>): void {
+    this.status = { ...this.status, ...patch };
+    for (const cb of this.statusListeners) cb({ ...this.status });
+  }
+
+  public async connectNetwork(networkId: NetworkId, customEndpoint?: string): Promise<StreamStatus> {
+    if (this.ws) {
+      this.ws.close();
+      this.ws = null;
+    }
+    const url = customEndpoint?.trim() || NETWORK_PRESETS[networkId].endpoints[0];
+    this.emitStatus({ connected: false, connecting: true, networkId, endpoint: url, error: undefined });
+
+    const ws = new WebSocket(url);
+    this.ws = ws;
+
+    ws.onopen = () => {
+      this.emitStatus({ connected: true, connecting: false, endpoint: url });
+      ws.send(JSON.stringify({ id: 'sub1', command: 'subscribe', streams: ['ledger', 'transactions', 'transactions_proposed'] }));
+      ws.send(JSON.stringify({ id: 'sub2', command: 'subscribe', streams: ['validations'] }));
+      ws.send(JSON.stringify({ id: 'sub3', command: 'subscribe', streams: ['consensus'] }));
+    };
+
+    ws.onmessage = (evt) => {
+      try {
+        const msg = JSON.parse(String(evt.data)) as Record<string, unknown>;
+        if (typeof msg.id === 'number' && this.pending.has(msg.id)) {
+          const item = this.pending.get(msg.id)!;
+          this.pending.delete(msg.id);
+          if (msg.status === 'error') item.reject(new Error(String(msg.error_message ?? msg.error)));
+          else item.resolve(msg);
+          return;
+        }
+        if (msg.type === 'ledgerClosed') {
+          const snap: LedgerSnapshot = {
+            ledgerIndex: Number(msg.ledger_index ?? 0),
+            ledgerHash: String(msg.ledger_hash ?? ''),
+            ledgerTime: rippleTimeToUnixMs(typeof msg.ledger_time === 'number' ? msg.ledger_time : undefined),
+            txnCount: Number(msg.txn_count ?? 0),
+            feeBaseDrops: Number(msg.fee_base ?? 10),
+            reserveBaseXrp: dropsToXrpNumber(msg.reserve_base as number | string | undefined) || 1,
+            reserveIncXrp: dropsToXrpNumber(msg.reserve_inc as number | string | undefined) || 0.2,
+            validatedLedgers: String(msg.validated_ledgers ?? ''),
+          };
+          for (const cb of this.ledgerListeners) cb(snap);
+        } else if (msg.type === 'transaction') {
+          const parsed = parseLiveTransactionEvent(msg);
+          if (parsed) {
+            for (const cb of this.txListeners) cb(parsed);
+          }
+        } else if (msg.type === 'validationReceived') {
+          const val: ValidationPulse = {
+            validationPublicKey: String(msg.validation_public_key ?? ''),
+            ledgerHash: String(msg.ledger_hash ?? ''),
+            ledgerIndex: Number(msg.ledger_index ?? 0),
+            full: Boolean(msg.full),
+            timestamp: Date.now(),
+          };
+          if (val.validationPublicKey) {
+            for (const cb of this.valListeners) cb(val);
+          }
+        } else if (msg.type === 'consensusPhase') {
+          const raw = String(msg.consensus ?? '').toLowerCase();
+          const phase: ConsensusPhase =
+            raw === 'open' || raw === 'establish' || raw === 'accepted' ? raw : 'unknown';
+          this.emitStatus({ consensusPhase: phase });
+          for (const cb of this.phaseListeners) cb(phase);
+        }
+      } catch {
+        // ignore
+      }
+    };
+
+    ws.onerror = () => this.emitStatus({ error: 'WebSocket connection error' });
+    ws.onclose = () => this.emitStatus({ connected: false, connecting: false });
+
+    return { ...this.status };
+  }
+
+  public async getStreamStatus(): Promise<StreamStatus> {
+    return { ...this.status };
+  }
+
+  public rpcRequest(command: string, params: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
+    return new Promise((resolve, reject) => {
+      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket disconnected'));
+        return;
+      }
+      const id = this.seq++;
+      this.pending.set(id, { resolve, reject });
+      this.ws.send(JSON.stringify({ id, command, ...params }));
+    });
+  }
+
+  public async fetchValidators(): Promise<{
+    validators: ValidatorRecord[];
+    topology: TopologyNode[];
+    fetchedAt: number;
+    source: string;
+  }> {
+    return { validators: [], topology: [], fetchedAt: Date.now(), source: 'browser-preview' };
+  }
+
+  public async fetchTokens(): Promise<{ tokens: TokenRecord[]; fetchedAt: number; source: string }> {
+    return { tokens: [], fetchedAt: Date.now(), source: 'browser-preview' };
+  }
+
+  public async inspectTokenOnLedger(currencyRaw: string, issuer: string): Promise<TokenOnLedgerReport> {
+    const acct = await this.rpcRequest('account_info', { account: issuer, ledger_index: 'validated' });
+    const data = ((acct.result as Record<string, unknown>)?.account_data ?? {}) as Record<string, unknown>;
+    return {
+      currency: decodeCurrencyCode(currencyRaw),
+      currencyRaw,
+      issuer,
+      fetchedAt: Date.now(),
+      xrpBalance: dropsToXrpString(String(data.Balance ?? '0'), 2),
+      flags: decodeIssuerRiskFlags(Number(data.Flags ?? 0)),
+      bids: [],
+      asks: [],
+      amm: null,
+    };
+  }
+
+  public async inspectQuery(query: string): Promise<InspectorResult> {
+    const kind = detectQueryKind(query);
+    if (kind === 'account') {
+      const res = await this.rpcRequest('account_info', { account: query.trim(), ledger_index: 'validated' });
+      const acct = ((res.result as Record<string, unknown>)?.account_data ?? {}) as Record<string, unknown>;
+      return {
+        kind: 'account',
+        query,
+        title: query.trim(),
+        subtitle: 'XRPL AccountRoot',
+        summary: [
+          { label: 'XRP Balance', value: `${dropsToXrpString(String(acct.Balance ?? '0'), 4)} XRP`, tone: 'cyan' },
+          { label: 'Sequence', value: String(acct.Sequence ?? '—') },
+        ],
+        flags: decodeIssuerRiskFlags(Number(acct.Flags ?? 0)),
+        raw: res.result,
+      };
+    }
+    return {
+      kind: 'error',
+      query,
+      title: 'Desktop Mode Required for Full Indexing',
+      subtitle: 'Run via Electron desktop app for complete multi-query inspection.',
+      summary: [],
+      raw: { query },
+    };
+  }
+
+  public async nodeOpsPoll(config: NodeConnectionConfig): Promise<NodeOpsSnapshot> {
+    return {
+      connected: false,
+      endpoint: config.rpcUrl,
+      checkedAt: Date.now(),
+      error: 'Direct local rippled Admin RPC requires running the desktop Electron build.',
+      peers: [],
+      amendments: [],
+      adminAvailable: false,
+    };
+  }
+
+  public async nodeOpsAdminCommand(): Promise<{ ok: boolean; error?: string }> {
+    return { ok: false, error: 'Admin RPC commands require the desktop Electron app.' };
+  }
+
+  public async nodeOpsReadLogTail(): Promise<{ ok: boolean; lines: string[]; error?: string }> {
+    return { ok: false, lines: [], error: 'Local log tailing requires the desktop Electron app.' };
+  }
+
+  public async notifyDesktop(_payload: DesktopNotificationPayload): Promise<void> {
+    // no-op in browser fallback
+  }
+
+  public onStreamStatus(cb: Listener<StreamStatus>): () => void {
+    this.statusListeners.add(cb);
+    return () => this.statusListeners.delete(cb);
+  }
+  public onLedgerClosed(cb: Listener<LedgerSnapshot>): () => void {
+    this.ledgerListeners.add(cb);
+    return () => this.ledgerListeners.delete(cb);
+  }
+  public onTransaction(cb: Listener<LiveTransaction>): () => void {
+    this.txListeners.add(cb);
+    return () => this.txListeners.delete(cb);
+  }
+  public onValidation(cb: Listener<ValidationPulse>): () => void {
+    this.valListeners.add(cb);
+    return () => this.valListeners.delete(cb);
+  }
+  public onConsensusPhase(cb: Listener<ConsensusPhase>): () => void {
+    this.phaseListeners.add(cb);
+    return () => this.phaseListeners.delete(cb);
+  }
+}
+
+let fallbackInstance: BrowserFallbackBridge | null = null;
+
+export function getXrplBridge(): Omit<XrplDesktopApi, 'isElectron' | 'platform' | 'version'> & {
+  isElectron: boolean;
+  platform: string;
+  version: string;
+} {
+  if (typeof window !== 'undefined' && window.xrplApi) {
+    return window.xrplApi;
+  }
+  if (!fallbackInstance) {
+    fallbackInstance = new BrowserFallbackBridge();
+  }
+  const fb = fallbackInstance;
+  return {
+    isElectron: false,
+    platform: 'web-preview',
+    version: '0.0.1-alpha',
+    connectNetwork: (n, c) => fb.connectNetwork(n, c),
+    getStreamStatus: () => fb.getStreamStatus(),
+    rpcRequest: (cmd, params) => fb.rpcRequest(cmd, params),
+    fetchValidators: () => fb.fetchValidators(),
+    fetchTokens: () => fb.fetchTokens(),
+    inspectTokenOnLedger: (c, i) => fb.inspectTokenOnLedger(c, i),
+    inspectQuery: (q) => fb.inspectQuery(q),
+    nodeOpsPoll: (cfg) => fb.nodeOpsPoll(cfg),
+    nodeOpsAdminCommand: () => fb.nodeOpsAdminCommand(),
+    nodeOpsReadLogTail: () => fb.nodeOpsReadLogTail(),
+    notifyDesktop: (p) => fb.notifyDesktop(p),
+    onStreamStatus: (cb) => fb.onStreamStatus(cb),
+    onLedgerClosed: (cb) => fb.onLedgerClosed(cb),
+    onTransaction: (cb) => fb.onTransaction(cb),
+    onValidation: (cb) => fb.onValidation(cb),
+    onConsensusPhase: (cb) => fb.onConsensusPhase(cb),
+  };
+}

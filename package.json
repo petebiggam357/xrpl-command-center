@@ -1,0 +1,50 @@
+{
+  "name": "xrpl-command-center",
+  "productName": "XRPL Command Center",
+  "version": "0.0.1-alpha",
+  "description": "Cross-platform real-time XRP Ledger Command Center, visual telemetry engine, token/validator explorer, and self-hosted rippled/Clio node operations console.",
+  "main": "dist-electron/main.js",
+  "author": "XRPL Command Center Contributors",
+  "license": "MIT",
+  "scripts": {
+    "dev:renderer": "vite",
+    "build:electron": "node scripts/build-electron.mjs",
+    "dev": "npm run build:electron && concurrently -k -n VITE,ELECTRON -c cyan,green \"vite --port 5173 --strictPort\" \"wait-on tcp:5173 && electron .\"",
+    "build:renderer": "vite build",
+    "build": "npm run build:renderer && npm run build:electron",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "dist:linux": "npm run build && electron-builder --linux AppImage",
+    "dist:win": "npm run build && electron-builder --win nsis portable",
+    "dist:mac": "npm run build && electron-builder --mac dmg",
+    "dist:dir": "npm run build && electron-builder --dir"
+  },
+  "dependencies": {
+    "lucide-react": "^0.454.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "three": "^0.169.0",
+    "ws": "^8.18.0",
+    "zustand": "^4.5.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.6",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@types/three": "^0.169.0",
+    "@types/ws": "^8.5.12",
+    "@vitejs/plugin-react": "^4.3.3",
+    "autoprefixer": "^10.4.20",
+    "concurrently": "^9.0.1",
+    "electron": "^31.7.7",
+    "electron-builder": "^24.13.3",
+    "esbuild": "^0.24.0",
+    "postcss": "^8.4.47",
+    "tailwindcss": "^3.4.14",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11",
+    "vitest": "^2.1.4",
+    "wait-on": "^8.0.1"
+  }
+}
