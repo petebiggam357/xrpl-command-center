@@ -27,6 +27,7 @@ export const CommandPalette: React.FC = () => {
     { tab: 'globe', label: '3D Validator Globe', hint: 'Interactive WebGL2 Holographic Globe' },
     { tab: 'validators', label: 'Validators & UNL', hint: 'Agreement Scores & Live Votes' },
     { tab: 'tokens', label: 'Tokens, DEX & AMM', hint: 'All Issued Currencies & Risk Flags' },
+    { tab: 'wallets', label: 'Wallets & DeFi Studio', hint: 'Encrypted Vault, Payments, DEX, AMM & NFTs' },
     { tab: 'nodeops', label: 'My Node Ops Console', hint: 'Manage Your Own rippled / Clio Node' },
   ];
 

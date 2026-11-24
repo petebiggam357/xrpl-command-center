@@ -8,6 +8,7 @@ import {
   Server,
   ShieldCheck,
   Trash2,
+  Wallet,
 } from 'lucide-react';
 import { shortenAddress } from '../shared/xrplCodec';
 import { type NavTab, useCommandStore } from '../store/useCommandStore';
@@ -22,6 +23,7 @@ const NAV_ITEMS: Array<{
   { id: 'globe', label: '3D Globe', subtitle: 'Holographic Consensus', icon: Globe2 },
   { id: 'validators', label: 'Validators', subtitle: 'UNL & Quorum Health', icon: ShieldCheck },
   { id: 'tokens', label: 'Tokens & DEX', subtitle: 'IOUs, MPTs & AMM Pools', icon: Coins },
+  { id: 'wallets', label: 'Wallets & DeFi', subtitle: 'Vault, DEX, AMM & NFTs', icon: Wallet },
   { id: 'nodeops', label: 'My Node Ops', subtitle: 'rippled / Clio Admin', icon: Server },
 ];
 

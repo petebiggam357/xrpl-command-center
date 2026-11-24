@@ -1,18 +1,22 @@
-import { app, BrowserWindow, ipcMain, Notification, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, Notification, safeStorage, shell } from 'electron';
 import path from 'node:path';
 import type {
   DesktopNotificationPayload,
   NetworkId,
   NodeConnectionConfig,
+  WalletAlgorithm,
+  WalletTxIntent,
 } from '../src/shared/types';
 import { DirectoryService } from './directoryService';
 import { NodeOpsService } from './nodeOpsService';
+import { WalletVaultService } from './walletVaultService';
 import { XrplStreamManager } from './xrplStream';
 
 let mainWindow: BrowserWindow | null = null;
 const streamManager = new XrplStreamManager();
 const directoryService = new DirectoryService();
 const nodeOpsService = new NodeOpsService();
+let walletVault: WalletVaultService;
 
 function sendToRenderer(channel: string, payload: unknown): void {
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -121,9 +125,48 @@ function registerIpcHandlers(): void {
       notif.show();
     }
   });
+
+  // Wallet Vault & DeFi IPC Handlers
+  ipcMain.handle('wallet:getStatus', () => walletVault.getStatus());
+  ipcMain.handle('wallet:setup', (_evt, passphrase: string) => walletVault.setupVault(passphrase));
+  ipcMain.handle('wallet:unlock', (_evt, passphrase: string) => walletVault.unlock(passphrase));
+  ipcMain.handle('wallet:lock', async () => {
+    walletVault.lock();
+    return walletVault.getStatus();
+  });
+  ipcMain.handle('wallet:create', (_evt, label: string, algorithm: WalletAlgorithm) =>
+    walletVault.createWallet(label, algorithm)
+  );
+  ipcMain.handle('wallet:importSeed', (_evt, label: string, seed: string) =>
+    walletVault.importSeed(label, seed)
+  );
+  ipcMain.handle('wallet:addWatchOnly', (_evt, label: string, address: string) =>
+    walletVault.addWatchOnly(label, address)
+  );
+  ipcMain.handle('wallet:removeAccount', (_evt, walletId: string) =>
+    walletVault.removeAccount(walletId)
+  );
+  ipcMain.handle('wallet:fetchPortfolio', (_evt, address: string) =>
+    walletVault.fetchPortfolio(streamManager, address)
+  );
+  ipcMain.handle('wallet:fundFaucet', (_evt, address: string, networkId: NetworkId) =>
+    walletVault.fundFromFaucet(address, networkId)
+  );
+  ipcMain.handle('wallet:preflightTx', (_evt, intent: WalletTxIntent) =>
+    walletVault.preflightTransaction(streamManager, intent)
+  );
+  ipcMain.handle('wallet:signAndSubmitTx', (_evt, walletId: string, intent: WalletTxIntent) =>
+    walletVault.signAndSubmit(streamManager, walletId, intent)
+  );
 }
 
 app.whenReady().then(() => {
+  walletVault = new WalletVaultService(app.getPath('userData'), {
+    isAvailable: () => safeStorage.isEncryptionAvailable(),
+    encrypt: (plain) => safeStorage.encryptString(plain),
+    decrypt: (buf) => safeStorage.decryptString(buf),
+  });
+
   registerIpcHandlers();
   createWindow();
   void streamManager.connect('mainnet');
@@ -136,6 +179,7 @@ app.whenReady().then(() => {
 });
 
 app.on('before-quit', () => {
+  if (walletVault) walletVault.lock();
   streamManager.destroy();
 });
 

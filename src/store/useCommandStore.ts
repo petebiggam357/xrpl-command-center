@@ -12,13 +12,18 @@ import type {
   TokenRecord,
   TopologyNode,
   TxCategory,
+  TxPreflightPreview,
+  TxSubmitResult,
   ValidationPulse,
   ValidatorRecord,
+  VaultStatus,
+  WalletPortfolioSnapshot,
+  WalletTxIntent,
   WatchlistEntry,
 } from '../shared/types';
 import { getXrplBridge } from '../services/xrplBridge';
 
-export type NavTab = 'command' | 'globe' | 'validators' | 'tokens' | 'nodeops';
+export type NavTab = 'command' | 'globe' | 'validators' | 'tokens' | 'wallets' | 'nodeops';
 
 const MAX_LEDGERS = 36;
 const MAX_TX_FEED = 180;
@@ -100,6 +105,18 @@ interface CommandState {
   inspectorLoading: boolean;
   inspectorResult: InspectorResult | null;
 
+  // Wallet Vault & DeFi State
+  vaultStatus: VaultStatus;
+  selectedWalletId: string | null;
+  walletPortfolio: WalletPortfolioSnapshot | null;
+  walletPortfolioLoading: boolean;
+  pendingTxWalletId: string | null;
+  pendingTxIntent: WalletTxIntent | null;
+  pendingTxPreview: TxPreflightPreview | null;
+  pendingTxLoading: boolean;
+  txSubmitting: boolean;
+  lastTxResult: TxSubmitResult | null;
+
   // Node Ops
   nodeConfig: NodeConnectionConfig;
   nodeSnapshot: NodeOpsSnapshot | null;
@@ -129,6 +146,16 @@ interface CommandState {
   inspectQuery: (query: string) => Promise<void>;
   inspectLiveTransaction: (tx: LiveTransaction) => void;
   closeInspector: () => void;
+
+  // Wallet Vault Actions
+  refreshVaultStatus: () => Promise<void>;
+  selectWallet: (walletId: string | null) => Promise<void>;
+  refreshWalletPortfolio: () => Promise<void>;
+  openTxConfirmModal: (walletId: string, intent: WalletTxIntent) => Promise<void>;
+  confirmAndSignPendingTx: () => Promise<void>;
+  closeTxConfirmModal: () => void;
+
+  // Node Ops Actions
   updateNodeConfig: (patch: Partial<NodeConnectionConfig>) => void;
   setNodeAutoPoll: (enabled: boolean) => void;
   pollOwnNode: () => Promise<void>;
@@ -191,6 +218,22 @@ export const useCommandStore = create<CommandState>((set, get) => ({
   inspectorLoading: false,
   inspectorResult: null,
 
+  vaultStatus: {
+    initialized: false,
+    unlocked: false,
+    osKeychainAvailable: false,
+    accounts: [],
+  },
+  selectedWalletId: null,
+  walletPortfolio: null,
+  walletPortfolioLoading: false,
+  pendingTxWalletId: null,
+  pendingTxIntent: null,
+  pendingTxPreview: null,
+  pendingTxLoading: false,
+  txSubmitting: false,
+  lastTxResult: null,
+
   nodeConfig: loadSavedNodeConfig(),
   nodeSnapshot: null,
   nodePolling: false,
@@ -222,6 +265,10 @@ export const useCommandStore = create<CommandState>((set, get) => ({
     set({ streamStatus: status });
     void get().refreshValidators();
     void get().refreshTokens();
+    // Refresh active wallet portfolio on network switch after brief connection settle
+    setTimeout(() => {
+      void get().refreshWalletPortfolio();
+    }, 1200);
   },
 
   ingestStreamStatus: (status) => set({ streamStatus: status }),
@@ -244,7 +291,12 @@ export const useCommandStore = create<CommandState>((set, get) => ({
     const now = Date.now();
     const cutoff = now - 10_000;
 
-    // Watchlist matching even when UI stream is paused
+    // Auto-refresh wallet portfolio if an incoming validated tx touches the selected wallet
+    const selectedAddr = state.vaultStatus.accounts.find((a) => a.id === state.selectedWalletId)?.address;
+    if (tx.validated && selectedAddr && (tx.account === selectedAddr || tx.destination === selectedAddr)) {
+      void get().refreshWalletPortfolio();
+    }
+
     for (const item of state.watchlist) {
       const target = item.target.trim();
       const matchedAccount =
@@ -276,7 +328,6 @@ export const useCommandStore = create<CommandState>((set, get) => ({
         [tx.category]: (s.txCategoryCounts[tx.category] ?? 0) + 1,
       };
 
-      // Live discovery of non-XRP tokens seen on stream
       let nextTokens = s.tokens;
       if (tx.currency && tx.currency !== 'XRP' && tx.issuer) {
         const exists = s.tokens.some((t) => t.issuer === tx.issuer && t.currency === tx.currency);
@@ -428,6 +479,79 @@ export const useCommandStore = create<CommandState>((set, get) => ({
   },
 
   closeInspector: () => set({ inspectorOpen: false }),
+
+  // Wallet Vault Actions
+  refreshVaultStatus: async () => {
+    const status = await getXrplBridge().walletGetStatus();
+    const curSelected = get().selectedWalletId;
+    const validSelected =
+      curSelected && status.accounts.some((a) => a.id === curSelected)
+        ? curSelected
+        : status.accounts[0]?.id ?? null;
+
+    set({ vaultStatus: status, selectedWalletId: validSelected });
+    if (validSelected && (!get().walletPortfolio || get().walletPortfolio?.address !== status.accounts.find((a) => a.id === validSelected)?.address)) {
+      void get().refreshWalletPortfolio();
+    }
+  },
+
+  selectWallet: async (walletId) => {
+    set({ selectedWalletId: walletId, walletPortfolio: null });
+    if (walletId) {
+      await get().refreshWalletPortfolio();
+    }
+  },
+
+  refreshWalletPortfolio: async () => {
+    const { selectedWalletId, vaultStatus } = get();
+    const acct = vaultStatus.accounts.find((a) => a.id === selectedWalletId);
+    if (!acct) {
+      set({ walletPortfolio: null, walletPortfolioLoading: false });
+      return;
+    }
+    set({ walletPortfolioLoading: true });
+    try {
+      const snap = await getXrplBridge().walletFetchPortfolio(acct.address);
+      if (get().selectedWalletId === acct.id) {
+        set({ walletPortfolio: snap, walletPortfolioLoading: false });
+      }
+    } catch {
+      set({ walletPortfolioLoading: false });
+    }
+  },
+
+  openTxConfirmModal: async (walletId, intent) => {
+    set({
+      pendingTxWalletId: walletId,
+      pendingTxIntent: intent,
+      pendingTxPreview: null,
+      pendingTxLoading: true,
+      lastTxResult: null,
+    });
+    const preview = await getXrplBridge().walletPreflightTx(intent);
+    set({ pendingTxPreview: preview, pendingTxLoading: false });
+  },
+
+  confirmAndSignPendingTx: async () => {
+    const { pendingTxWalletId, pendingTxIntent } = get();
+    if (!pendingTxWalletId || !pendingTxIntent) return;
+    set({ txSubmitting: true });
+    const res = await getXrplBridge().walletSignAndSubmitTx(pendingTxWalletId, pendingTxIntent);
+    set({ txSubmitting: false, lastTxResult: res });
+    if (res.ok) {
+      void get().refreshWalletPortfolio();
+    }
+  },
+
+  closeTxConfirmModal: () =>
+    set({
+      pendingTxWalletId: null,
+      pendingTxIntent: null,
+      pendingTxPreview: null,
+      pendingTxLoading: false,
+      txSubmitting: false,
+      lastTxResult: null,
+    }),
 
   updateNodeConfig: (patch) =>
     set((s) => {

@@ -136,6 +136,7 @@ export interface IssuerRiskFlags {
   requireAuth: boolean;
   defaultRipple: boolean;
   depositAuth: boolean;
+  requireDestTag?: boolean;
   regularKey?: string;
   domain?: string;
 }
@@ -186,9 +187,9 @@ export interface InspectorResult {
 }
 
 export interface NodeConnectionConfig {
-  rpcUrl: string; // e.g. http://127.0.0.1:5005
-  wsUrl?: string; // e.g. ws://127.0.0.1:6006
-  logFilePath?: string; // e.g. /var/log/rippled/debug.log
+  rpcUrl: string;
+  wsUrl?: string;
+  logFilePath?: string;
   label: string;
 }
 
@@ -256,6 +257,241 @@ export interface DesktopNotificationPayload {
   body: string;
 }
 
+// ============================================================================
+// Encrypted Local Wallet Vault & DeFi Transaction Suite Types
+// ============================================================================
+
+export type WalletAlgorithm = 'ed25519' | 'ecdsa-secp256k1';
+
+export interface WalletAccountPublic {
+  id: string;
+  label: string;
+  address: string;
+  kind: 'custodial' | 'watch-only';
+  algorithm?: WalletAlgorithm;
+  createdAt: number;
+}
+
+export interface VaultStatus {
+  initialized: boolean;
+  unlocked: boolean;
+  osKeychainAvailable: boolean;
+  accounts: WalletAccountPublic[];
+}
+
+export interface WalletTokenBalance {
+  currency: string;
+  currencyRaw: string;
+  issuer: string;
+  balance: string;
+  limit: string;
+  noRipple: boolean;
+  authorized: boolean;
+  freeze: boolean;
+}
+
+export interface WalletOpenOffer {
+  seq: number;
+  flags: number;
+  takerGetsDisplay: string;
+  takerPaysDisplay: string;
+  quality?: string;
+  expiration?: number;
+}
+
+export interface WalletEscrowEntry {
+  index: string;
+  account: string;
+  destination: string;
+  amountXrp: string;
+  finishAfterMs?: number;
+  cancelAfterMs?: number;
+  offerSequence?: number;
+  condition?: string;
+}
+
+export interface WalletCheckEntry {
+  index: string;
+  account: string;
+  destination: string;
+  sendMaxDisplay: string;
+  sendMaxRaw: string | { currency: string; issuer: string; value: string };
+  sequence: number;
+  expirationMs?: number;
+  destinationTag?: number;
+}
+
+export interface WalletNftEntry {
+  nftokenId: string;
+  issuer: string;
+  taxon: number;
+  serial: number;
+  uriDecoded?: string;
+  uriHex?: string;
+  transferFeeBps: number;
+  flags: number;
+}
+
+export interface WalletPortfolioSnapshot {
+  address: string;
+  funded: boolean;
+  fetchedAt: number;
+  totalXrp: number;
+  totalXrpDisplay: string;
+  baseReserveXrp: number;
+  ownerReserveXrp: number;
+  spendableXrp: number;
+  sequence: number;
+  ownerCount: number;
+  domain?: string;
+  flags: IssuerRiskFlags;
+  tokens: WalletTokenBalance[];
+  offers: WalletOpenOffer[];
+  escrows: WalletEscrowEntry[];
+  checks: WalletCheckEntry[];
+  nfts: WalletNftEntry[];
+  recentTransactions: LiveTransaction[];
+  qrSvg?: string;
+  error?: string;
+}
+
+export interface AssetSpec {
+  currency: string; // 'XRP' or 3-char or 40-hex currencyRaw
+  issuer?: string;
+  value: string;
+}
+
+export type WalletTxIntent =
+  | {
+      kind: 'Payment';
+      account: string;
+      destination: string;
+      asset: AssetSpec;
+      destinationTag?: number;
+      memoText?: string;
+    }
+  | {
+      kind: 'TrustSet';
+      account: string;
+      currency: string;
+      issuer: string;
+      limit: string;
+      allowRippling?: boolean;
+    }
+  | {
+      kind: 'OfferCreate';
+      account: string;
+      takerGets: AssetSpec; // What the creator offers to give/sell
+      takerPays: AssetSpec; // What the creator wants to receive/buy
+      orderMode?: 'limit' | 'passive' | 'ioc' | 'fok';
+    }
+  | {
+      kind: 'OfferCancel';
+      account: string;
+      offerSequence: number;
+    }
+  | {
+      kind: 'AMMDeposit';
+      account: string;
+      asset1: { currency: string; issuer?: string };
+      asset2: { currency: string; issuer?: string };
+      amount1: AssetSpec;
+      amount2?: AssetSpec;
+    }
+  | {
+      kind: 'AMMWithdraw';
+      account: string;
+      asset1: { currency: string; issuer?: string };
+      asset2: { currency: string; issuer?: string };
+      withdrawAll: boolean;
+      amount1?: AssetSpec;
+    }
+  | {
+      kind: 'EscrowCreate';
+      account: string;
+      destination: string;
+      amountXrp: string;
+      finishAfterUnixMs: number;
+      cancelAfterUnixMs?: number;
+      destinationTag?: number;
+      memoText?: string;
+    }
+  | {
+      kind: 'EscrowFinish';
+      account: string;
+      owner: string;
+      offerSequence: number;
+    }
+  | {
+      kind: 'EscrowCancel';
+      account: string;
+      owner: string;
+      offerSequence: number;
+    }
+  | {
+      kind: 'CheckCreate';
+      account: string;
+      destination: string;
+      sendMax: AssetSpec;
+      destinationTag?: number;
+      expirationUnixMs?: number;
+    }
+  | {
+      kind: 'CheckCash';
+      account: string;
+      checkId: string;
+      amount: AssetSpec;
+    }
+  | {
+      kind: 'CheckCancel';
+      account: string;
+      checkId: string;
+    }
+  | {
+      kind: 'NFTokenMint';
+      account: string;
+      uriText: string;
+      taxon: number;
+      transferFeeBps: number;
+      transferable: boolean;
+      burnable: boolean;
+    }
+  | {
+      kind: 'NFTokenCreateOffer';
+      account: string;
+      nftokenId: string;
+      amountXrp: string;
+      destination?: string;
+      isSellOffer: boolean;
+    }
+  | {
+      kind: 'NFTokenBurn';
+      account: string;
+      nftokenId: string;
+    };
+
+export interface TxPreflightPreview {
+  ok: boolean;
+  networkId: NetworkId;
+  endpoint: string;
+  txJson: Record<string, unknown>;
+  feeDrops: string;
+  feeXrp: string;
+  summaryLines: Array<{ label: string; value: string }>;
+  warnings: string[];
+  blockingError?: string;
+}
+
+export interface TxSubmitResult {
+  ok: boolean;
+  hash?: string;
+  engineResult?: string;
+  engineMessage?: string;
+  validated?: boolean;
+  ledgerIndex?: number;
+  error?: string;
+}
+
 export interface XrplDesktopApi {
   isElectron: true;
   platform: string;
@@ -284,6 +520,33 @@ export interface XrplDesktopApi {
   ) => Promise<{ ok: boolean; result?: unknown; error?: string }>;
   nodeOpsReadLogTail: (filePath: string, maxLines?: number) => Promise<{ ok: boolean; lines: string[]; error?: string }>;
   notifyDesktop: (payload: DesktopNotificationPayload) => Promise<void>;
+
+  // Wallet Vault & DeFi IPC
+  walletGetStatus: () => Promise<VaultStatus>;
+  walletSetupVault: (passphrase: string) => Promise<{ ok: boolean; status?: VaultStatus; error?: string }>;
+  walletUnlockVault: (passphrase: string) => Promise<{ ok: boolean; status?: VaultStatus; error?: string }>;
+  walletLockVault: () => Promise<VaultStatus>;
+  walletCreate: (
+    label: string,
+    algorithm: WalletAlgorithm
+  ) => Promise<{ ok: boolean; account?: WalletAccountPublic; oneTimeSeed?: string; status?: VaultStatus; error?: string }>;
+  walletImportSeed: (
+    label: string,
+    seed: string
+  ) => Promise<{ ok: boolean; account?: WalletAccountPublic; status?: VaultStatus; error?: string }>;
+  walletAddWatchOnly: (
+    label: string,
+    address: string
+  ) => Promise<{ ok: boolean; account?: WalletAccountPublic; status?: VaultStatus; error?: string }>;
+  walletRemoveAccount: (walletId: string) => Promise<VaultStatus>;
+  walletFetchPortfolio: (address: string) => Promise<WalletPortfolioSnapshot>;
+  walletFundFaucet: (
+    address: string,
+    networkId: NetworkId
+  ) => Promise<{ ok: boolean; message?: string; error?: string }>;
+  walletPreflightTx: (intent: WalletTxIntent) => Promise<TxPreflightPreview>;
+  walletSignAndSubmitTx: (walletId: string, intent: WalletTxIntent) => Promise<TxSubmitResult>;
+
   onStreamStatus: (cb: (status: StreamStatus) => void) => () => void;
   onLedgerClosed: (cb: (ledger: LedgerSnapshot) => void) => () => void;
   onTransaction: (cb: (tx: LiveTransaction) => void) => () => void;

@@ -12,8 +12,14 @@ import type {
   TokenOnLedgerReport,
   TokenRecord,
   TopologyNode,
+  TxPreflightPreview,
+  TxSubmitResult,
   ValidationPulse,
   ValidatorRecord,
+  VaultStatus,
+  WalletAccountPublic,
+  WalletPortfolioSnapshot,
+  WalletTxIntent,
   XrplDesktopApi,
 } from '../shared/types';
 import {
@@ -28,10 +34,6 @@ import {
 
 type Listener<T> = (payload: T) => void;
 
-/**
- * Browser fallback bridge used only when previewing the renderer via `vite` outside Electron.
- * Inside Electron (.AppImage / .exe / .dmg), all calls go through `window.xrplApi`.
- */
 class BrowserFallbackBridge {
   private ws: WebSocket | null = null;
   private statusListeners = new Set<Listener<StreamStatus>>();
@@ -41,6 +43,7 @@ class BrowserFallbackBridge {
   private phaseListeners = new Set<Listener<ConsensusPhase>>();
   private pending = new Map<number, { resolve: (v: Record<string, unknown>) => void; reject: (e: Error) => void }>();
   private seq = 1;
+  private watchAccounts: WalletAccountPublic[] = [];
   private status: StreamStatus = {
     connected: false,
     connecting: false,
@@ -227,6 +230,80 @@ class BrowserFallbackBridge {
     // no-op in browser fallback
   }
 
+  public async walletGetStatus(): Promise<VaultStatus> {
+    return {
+      initialized: false,
+      unlocked: false,
+      osKeychainAvailable: false,
+      accounts: this.watchAccounts,
+    };
+  }
+
+  public async walletAddWatchOnly(label: string, address: string) {
+    const acct: WalletAccountPublic = {
+      id: `watch-${Date.now()}`,
+      label: label || address.slice(0, 8),
+      address: address.trim(),
+      kind: 'watch-only',
+      createdAt: Date.now(),
+    };
+    this.watchAccounts = [acct, ...this.watchAccounts];
+    return { ok: true, account: acct, status: await this.walletGetStatus() };
+  }
+
+  public async walletRemoveAccount(id: string): Promise<VaultStatus> {
+    this.watchAccounts = this.watchAccounts.filter((a) => a.id !== id);
+    return this.walletGetStatus();
+  }
+
+  public async walletFetchPortfolio(address: string): Promise<WalletPortfolioSnapshot> {
+    try {
+      const res = await this.rpcRequest('account_info', { account: address, ledger_index: 'validated' });
+      const acct = ((res.result as Record<string, unknown>)?.account_data ?? {}) as Record<string, unknown>;
+      const xrp = dropsToXrpNumber(String(acct.Balance ?? '0'));
+      return {
+        address,
+        funded: true,
+        fetchedAt: Date.now(),
+        totalXrp: xrp,
+        totalXrpDisplay: dropsToXrpString(String(acct.Balance ?? '0'), 4),
+        baseReserveXrp: 1,
+        ownerReserveXrp: Number(acct.OwnerCount ?? 0) * 0.2,
+        spendableXrp: Math.max(0, xrp - 1 - Number(acct.OwnerCount ?? 0) * 0.2),
+        sequence: Number(acct.Sequence ?? 0),
+        ownerCount: Number(acct.OwnerCount ?? 0),
+        flags: decodeIssuerRiskFlags(Number(acct.Flags ?? 0)),
+        tokens: [],
+        offers: [],
+        escrows: [],
+        checks: [],
+        nfts: [],
+        recentTransactions: [],
+      };
+    } catch (err) {
+      return {
+        address,
+        funded: false,
+        fetchedAt: Date.now(),
+        totalXrp: 0,
+        totalXrpDisplay: '0',
+        baseReserveXrp: 1,
+        ownerReserveXrp: 0,
+        spendableXrp: 0,
+        sequence: 0,
+        ownerCount: 0,
+        flags: decodeIssuerRiskFlags(0),
+        tokens: [],
+        offers: [],
+        escrows: [],
+        checks: [],
+        nfts: [],
+        recentTransactions: [],
+        error: err instanceof Error ? err.message : 'Unable to fetch portfolio',
+      };
+    }
+  }
+
   public onStreamStatus(cb: Listener<StreamStatus>): () => void {
     this.statusListeners.add(cb);
     return () => this.statusListeners.delete(cb);
@@ -263,6 +340,10 @@ export function getXrplBridge(): Omit<XrplDesktopApi, 'isElectron' | 'platform' 
     fallbackInstance = new BrowserFallbackBridge();
   }
   const fb = fallbackInstance;
+  const desktopOnlyErr = async () => ({
+    ok: false,
+    error: 'Encrypted Wallet Vault & signing require the desktop Electron app (.AppImage / .exe / .dmg).',
+  });
   return {
     isElectron: false,
     platform: 'web-preview',
@@ -278,6 +359,33 @@ export function getXrplBridge(): Omit<XrplDesktopApi, 'isElectron' | 'platform' 
     nodeOpsAdminCommand: () => fb.nodeOpsAdminCommand(),
     nodeOpsReadLogTail: () => fb.nodeOpsReadLogTail(),
     notifyDesktop: (p) => fb.notifyDesktop(p),
+
+    walletGetStatus: () => fb.walletGetStatus(),
+    walletSetupVault: desktopOnlyErr,
+    walletUnlockVault: desktopOnlyErr,
+    walletLockVault: () => fb.walletGetStatus(),
+    walletCreate: desktopOnlyErr,
+    walletImportSeed: desktopOnlyErr,
+    walletAddWatchOnly: (l, a) => fb.walletAddWatchOnly(l, a),
+    walletRemoveAccount: (id) => fb.walletRemoveAccount(id),
+    walletFetchPortfolio: (a) => fb.walletFetchPortfolio(a),
+    walletFundFaucet: desktopOnlyErr,
+    walletPreflightTx: async (intent: WalletTxIntent): Promise<TxPreflightPreview> => ({
+      ok: false,
+      networkId: 'mainnet',
+      endpoint: '',
+      txJson: intent as unknown as Record<string, unknown>,
+      feeDrops: '12',
+      feeXrp: '0.000012',
+      summaryLines: [],
+      warnings: [],
+      blockingError: 'Transaction signing requires the desktop Electron app.',
+    }),
+    walletSignAndSubmitTx: async (): Promise<TxSubmitResult> => ({
+      ok: false,
+      error: 'Transaction signing requires the desktop Electron app.',
+    }),
+
     onStreamStatus: (cb) => fb.onStreamStatus(cb),
     onLedgerClosed: (cb) => fb.onLedgerClosed(cb),
     onTransaction: (cb) => fb.onTransaction(cb),

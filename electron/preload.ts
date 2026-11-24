@@ -8,6 +8,8 @@ import type {
   NodeConnectionConfig,
   StreamStatus,
   ValidationPulse,
+  WalletAlgorithm,
+  WalletTxIntent,
   XrplDesktopApi,
 } from '../src/shared/types';
 
@@ -42,6 +44,26 @@ const api: XrplDesktopApi = {
   nodeOpsReadLogTail: (filePath: string, maxLines?: number) =>
     ipcRenderer.invoke('nodeOps:readLogTail', filePath, maxLines),
   notifyDesktop: (payload: DesktopNotificationPayload) => ipcRenderer.invoke('desktop:notify', payload),
+
+  // Wallet Vault & DeFi IPC
+  walletGetStatus: () => ipcRenderer.invoke('wallet:getStatus'),
+  walletSetupVault: (passphrase: string) => ipcRenderer.invoke('wallet:setup', passphrase),
+  walletUnlockVault: (passphrase: string) => ipcRenderer.invoke('wallet:unlock', passphrase),
+  walletLockVault: () => ipcRenderer.invoke('wallet:lock'),
+  walletCreate: (label: string, algorithm: WalletAlgorithm) =>
+    ipcRenderer.invoke('wallet:create', label, algorithm),
+  walletImportSeed: (label: string, seed: string) =>
+    ipcRenderer.invoke('wallet:importSeed', label, seed),
+  walletAddWatchOnly: (label: string, address: string) =>
+    ipcRenderer.invoke('wallet:addWatchOnly', label, address),
+  walletRemoveAccount: (walletId: string) => ipcRenderer.invoke('wallet:removeAccount', walletId),
+  walletFetchPortfolio: (address: string) => ipcRenderer.invoke('wallet:fetchPortfolio', address),
+  walletFundFaucet: (address: string, networkId: NetworkId) =>
+    ipcRenderer.invoke('wallet:fundFaucet', address, networkId),
+  walletPreflightTx: (intent: WalletTxIntent) => ipcRenderer.invoke('wallet:preflightTx', intent),
+  walletSignAndSubmitTx: (walletId: string, intent: WalletTxIntent) =>
+    ipcRenderer.invoke('wallet:signAndSubmitTx', walletId, intent),
+
   onStreamStatus: (cb: (status: StreamStatus) => void) => subscribeChannel('xrpl:status', cb),
   onLedgerClosed: (cb: (ledger: LedgerSnapshot) => void) => subscribeChannel('xrpl:ledger', cb),
   onTransaction: (cb: (tx: LiveTransaction) => void) => subscribeChannel('xrpl:tx', cb),

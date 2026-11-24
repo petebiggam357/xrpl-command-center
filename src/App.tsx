@@ -8,9 +8,11 @@ import { NodeOpsDeck } from './components/NodeOpsDeck';
 import { SidebarNav } from './components/SidebarNav';
 import { TokenExplorer } from './components/TokenExplorer';
 import { TopHudBar } from './components/TopHudBar';
+import { TxConfirmModal } from './components/TxConfirmModal';
 import { TxParticleRiver } from './components/TxParticleRiver';
 import { ValidatorDeck } from './components/ValidatorDeck';
 import { ValidatorGlobe3D } from './components/ValidatorGlobe3D';
+import { WalletDeck } from './components/WalletDeck';
 import { getXrplBridge } from './services/xrplBridge';
 import { useCommandStore } from './store/useCommandStore';
 
@@ -40,6 +42,7 @@ export const App: React.FC = () => {
 
     void store.refreshValidators();
     void store.refreshTokens();
+    void store.refreshVaultStatus();
 
     return () => {
       for (const u of unsubs) u();
@@ -66,6 +69,7 @@ export const App: React.FC = () => {
       } else if (e.key === 'Escape') {
         const st = useCommandStore.getState();
         if (st.commandPaletteOpen) st.setCommandPaletteOpen(false);
+        else if (st.pendingTxIntent) st.closeTxConfirmModal();
         else if (st.inspectorOpen) st.closeInspector();
       }
     };
@@ -99,12 +103,14 @@ export const App: React.FC = () => {
           {activeTab === 'globe' && <ValidatorGlobe3D />}
           {activeTab === 'validators' && <ValidatorDeck />}
           {activeTab === 'tokens' && <TokenExplorer />}
+          {activeTab === 'wallets' && <WalletDeck />}
           {activeTab === 'nodeops' && <NodeOpsDeck />}
         </main>
       </div>
 
       <InspectorDrawer />
       <CommandPalette />
+      <TxConfirmModal />
     </div>
   );
 };

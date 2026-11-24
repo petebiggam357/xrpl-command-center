@@ -34,6 +34,57 @@ export function rippleTimeToUnixMs(rippleTime?: number): number {
 }
 
 /**
+ * Convert Unix milliseconds to Ripple epoch seconds (integer seconds since 2000-01-01T00:00:00Z).
+ */
+export function unixMsToRippleTime(unixMs: number): number {
+  return Math.max(0, Math.floor(unixMs / 1000) - RIPPLE_EPOCH_OFFSET_SEC);
+}
+
+/**
+ * Exact decimal XRP string -> drops string conversion using integer string parsing (no float drift).
+ * Throws an Error if invalid or negative/zero or >6 decimal places.
+ */
+export function xrpToDropsString(xrpInput: string | number): string {
+  const raw = String(xrpInput).trim();
+  if (!/^\d+(\.\d{1,6})?$/.test(raw)) {
+    throw new Error(`Invalid XRP amount "${raw}" (must be positive with up to 6 decimal places)`);
+  }
+  const [wholePart, fracPart = ''] = raw.split('.');
+  const paddedFrac = fracPart.padEnd(6, '0');
+  const drops = BigInt(wholePart) * 1_000_000n + BigInt(paddedFrac);
+  if (drops <= 0n) {
+    throw new Error('XRP amount must be greater than 0');
+  }
+  return drops.toString();
+}
+
+/**
+ * Encode a UTF-8 string into uppercase hexadecimal (used for XRPL Memos and NFTokenMint URIs).
+ */
+export function utf8ToHex(text: string): string {
+  const bytes = new TextEncoder().encode(text);
+  let out = '';
+  for (let i = 0; i < bytes.length; i++) {
+    out += bytes[i].toString(16).padStart(2, '0').toUpperCase();
+  }
+  return out;
+}
+
+/**
+ * Encode a human-readable currency code into XRPL's canonical 3-char or 40-hex representation.
+ */
+export function encodeCurrencyCode(code: string): string {
+  const trimmed = code.trim();
+  if (/^[0-9A-Fa-f]{40}$/.test(trimmed)) return trimmed.toUpperCase();
+  if (trimmed === 'XRP') return 'XRP';
+  if (trimmed.length === 3) return trimmed.toUpperCase();
+  if (trimmed.length > 0 && trimmed.length <= 20) {
+    return utf8ToHex(trimmed).padEnd(40, '0');
+  }
+  throw new Error(`Unsupported currency code "${trimmed}"`);
+}
+
+/**
  * Exact BigInt conversion from drops (1 XRP = 1,000,000 drops) to formatted XRP string.
  */
 export function dropsToXrpString(drops: string | number | bigint, maxDecimals = 6): string {
@@ -69,7 +120,6 @@ export function decodeCurrencyCode(currency: string): string {
   const trimmed = currency.trim();
   if (trimmed.length === 3) return trimmed;
   if (/^[0-9A-Fa-f]{40}$/.test(trimmed)) {
-    // Standard hex ASCII encoding starts with non-0x02 / non-0x03 byte
     let out = '';
     for (let i = 0; i < 40; i += 2) {
       const code = parseInt(trimmed.slice(i, i + 2), 16);
@@ -77,8 +127,7 @@ export function decodeCurrencyCode(currency: string): string {
       if (code >= 32 && code <= 126) {
         out += String.fromCharCode(code);
       } else {
-        // Non-ASCII / LP token (starts with 03)
-        if (trimmed.startsWith('03')) {
+        if (trimmed.startsWith('03') || trimmed.startsWith('03'.toLowerCase())) {
           return `LP-${trimmed.slice(2, 8).toUpperCase()}`;
         }
         return `${trimmed.slice(0, 8).toUpperCase()}…`;
@@ -91,7 +140,7 @@ export function decodeCurrencyCode(currency: string): string {
 }
 
 /**
- * Decode hex-encoded XRPL Domain field from AccountRoot.
+ * Decode hex-encoded XRPL Domain or NFToken URI field from ASCII bytes.
  */
 export function decodeHexAscii(hex?: string): string | undefined {
   if (!hex || !/^[0-9A-Fa-f]+$/.test(hex) || hex.length % 2 !== 0) return undefined;
@@ -104,7 +153,7 @@ export function decodeHexAscii(hex?: string): string | undefined {
 }
 
 /**
- * Decode AccountRoot security & issuer flags including blackholed detection.
+ * Decode AccountRoot security & issuer flags including blackholed & RequireDest detection.
  */
 export function decodeIssuerRiskFlags(
   flagsNum: number,
@@ -123,6 +172,7 @@ export function decodeIssuerRiskFlags(
     requireAuth: Boolean(f & LSF_FLAGS.REQUIRE_AUTH),
     defaultRipple: Boolean(f & LSF_FLAGS.DEFAULT_RIPPLE),
     depositAuth: Boolean(f & LSF_FLAGS.DEPOSIT_AUTH),
+    requireDestTag: Boolean(f & LSF_FLAGS.REQUIRE_DEST_TAG),
     regularKey,
     domain: decodeHexAscii(domainHex),
   };
@@ -151,7 +201,7 @@ interface XrplIssuedAmount {
   value: string;
 }
 
-function isIssuedAmount(val: unknown): val is XrplIssuedAmount {
+export function isIssuedAmount(val: unknown): val is XrplIssuedAmount {
   return (
     typeof val === 'object' &&
     val !== null &&
@@ -159,6 +209,16 @@ function isIssuedAmount(val: unknown): val is XrplIssuedAmount {
     'value' in val &&
     typeof (val as XrplIssuedAmount).currency === 'string'
   );
+}
+
+export function formatXrplAmount(val: unknown): string {
+  if (typeof val === 'string') {
+    return `${dropsToXrpString(val, 4)} XRP`;
+  }
+  if (isIssuedAmount(val)) {
+    return `${formatCompactNumber(Number(val.value))} ${decodeCurrencyCode(val.currency)}`;
+  }
+  return '—';
 }
 
 export function classifyTransaction(tx: Record<string, unknown>): {
@@ -290,7 +350,7 @@ export function classifyTransaction(tx: Record<string, unknown>): {
   }
 
   if (txType.startsWith('Escrow') || txType.startsWith('Check') || txType.startsWith('PaymentChannel')) {
-    const amt = tx.Amount;
+    const amt = tx.Amount ?? tx.SendMax;
     const xrp = typeof amt === 'string' ? dropsToXrpNumber(amt) : 0;
     return {
       category: 'escrow',
