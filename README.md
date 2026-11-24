@@ -93,7 +93,7 @@ Download the package for your operating system from the **Releases** page:
   chmod +x XRPL-Command-Center-0.0.1-alpha-linux-x86_64.AppImage
   ./XRPL-Command-Center-0.0.1-alpha-linux-x86_64.AppImage
   ```
-  > **Ubuntu / Pop!_OS 24.04 tip:** If AppArmor user-namespace restrictions or missing FUSE2 prevent direct launch, run with `--appimage-extract-and-run --no-sandbox`.
+  > **Ubuntu / Debian tip:** If AppArmor user-namespace restrictions or missing FUSE2 prevent direct launch, run with `--appimage-extract-and-run --no-sandbox`.
 - **Windows (`.exe`):** Run `XRPL-Command-Center-0.0.1-alpha-win-x64-nsis.exe` (installer) or the `portable.exe` standalone binary.
 - **macOS (`.dmg`):** Open the `arm64` (Apple Silicon) or `x64` (Intel) `.dmg` and drag **XRPL Command Center** to Applications.
 
