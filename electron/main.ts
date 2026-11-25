@@ -32,8 +32,9 @@ import { resolveRustSidecarBinaryPath, RustVaultSidecarClient } from './rustVaul
 import { WalletVaultService } from './walletVaultService';
 import { XrplStreamManager } from './xrplStream';
 
-const APP_VERSION = '0.1.1-beta';
+const APP_VERSION = '0.1.2-beta';
 const LEDGER_USB_VENDOR_ID = 0x2c97;
+const TREZOR_USB_VENDOR_IDS = new Set([0x1209, 0x534c]);
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -286,9 +287,12 @@ function createWindow(): void {
     callback(false);
   });
 
-  // Enable Chromium WebHID device selection exclusively for Ledger hardware wallets (0x2c97)
+  // Enable Chromium WebHID exclusively for Ledger (0x2c97) and WebUSB exclusively for Trezor (0x1209 / 0x534c)
   mainWindow.webContents.session.setDevicePermissionHandler((details) => {
     if (details.deviceType === 'hid' && details.device?.vendorId === LEDGER_USB_VENDOR_ID) {
+      return true;
+    }
+    if (details.deviceType === 'usb' && details.device?.vendorId !== undefined && TREZOR_USB_VENDOR_IDS.has(Number(details.device.vendorId))) {
       return true;
     }
     return false;
@@ -307,7 +311,26 @@ function createWindow(): void {
     callback(ledgerDevice ? ledgerDevice.deviceId : '');
   });
 
+  mainWindow.webContents.session.on('select-usb-device', (event, details, callback) => {
+    event.preventDefault();
+    const trezorDevice = details.deviceList.find((d) => TREZOR_USB_VENDOR_IDS.has(d.vendorId));
+    callback(trezorDevice ? trezorDevice.deviceId : '');
+  });
+
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (!url || url === 'about:blank') {
+      return {
+        action: 'allow',
+        overrideBrowserWindowOptions: {
+          autoHideMenuBar: true,
+          webPreferences: {
+            contextIsolation: true,
+            nodeIntegration: false,
+            sandbox: true,
+          },
+        },
+      };
+    }
     if (/^https?:\/\//i.test(url)) {
       void shell.openExternal(url);
     }

@@ -1,25 +1,48 @@
-import React, { useEffect } from 'react';
-import { AnalyticsDeck } from './components/AnalyticsDeck';
+import React, { lazy, Suspense, useEffect } from 'react';
 import { CommandPalette } from './components/CommandPalette';
 import { ConsensusCoreCanvas } from './components/ConsensusCoreCanvas';
 import { InspectorDrawer } from './components/InspectorDrawer';
 import { LedgerRibbon } from './components/LedgerRibbon';
 import { LiveTxFeed } from './components/LiveTxFeed';
-import { NodeOpsDeck } from './components/NodeOpsDeck';
-import { PrimitivesDeck } from './components/PrimitivesDeck';
+import { PerfHudPill } from './components/PerfHudPill';
 import { QuickStartModal } from './components/QuickStartModal';
 import { SidebarNav } from './components/SidebarNav';
-import { TokenExplorer } from './components/TokenExplorer';
 import { TopHudBar } from './components/TopHudBar';
 import { TxConfirmModal } from './components/TxConfirmModal';
 import { TxParticleRiver } from './components/TxParticleRiver';
-import { ValidatorDeck } from './components/ValidatorDeck';
-import { ValidatorGlobe3D } from './components/ValidatorGlobe3D';
-import { WalletDeck } from './components/WalletDeck';
 import { emitVisualLedgerPulse, emitVisualTx } from './services/streamVisualBus';
 import { getXrplBridge } from './services/xrplBridge';
 import type { LiveTransaction, ValidationPulse } from './shared/types';
 import { useCommandStore } from './store/useCommandStore';
+
+// Code-split secondary decks so cold startup only parses & executes the Command Deck
+const ValidatorGlobe3D = lazy(() =>
+  import('./components/ValidatorGlobe3D').then((m) => ({ default: m.ValidatorGlobe3D }))
+);
+const ValidatorDeck = lazy(() =>
+  import('./components/ValidatorDeck').then((m) => ({ default: m.ValidatorDeck }))
+);
+const TokenExplorer = lazy(() =>
+  import('./components/TokenExplorer').then((m) => ({ default: m.TokenExplorer }))
+);
+const WalletDeck = lazy(() =>
+  import('./components/WalletDeck').then((m) => ({ default: m.WalletDeck }))
+);
+const PrimitivesDeck = lazy(() =>
+  import('./components/PrimitivesDeck').then((m) => ({ default: m.PrimitivesDeck }))
+);
+const NodeOpsDeck = lazy(() =>
+  import('./components/NodeOpsDeck').then((m) => ({ default: m.NodeOpsDeck }))
+);
+const AnalyticsDeck = lazy(() =>
+  import('./components/AnalyticsDeck').then((m) => ({ default: m.AnalyticsDeck }))
+);
+
+const DeckFallback: React.FC = () => (
+  <div className="hud-panel rounded-xl p-10 text-center font-mono text-xs text-cyan-300">
+    Loading module…
+  </div>
+);
 
 export const App: React.FC = () => {
   const activeTab = useCommandStore((s) => s.activeTab);
@@ -76,17 +99,23 @@ export const App: React.FC = () => {
       }
     });
 
-    void store.refreshValidators();
-    void store.refreshTokens();
     void store.refreshVaultStatus();
     void store.refreshMarketPrice();
-    void store.refreshAmendments();
+
+    // Defer heavier directory fetches slightly so first paint of Command Deck is instantaneous
+    const deferredInit = setTimeout(() => {
+      const st = useCommandStore.getState();
+      void st.refreshValidators();
+      void st.refreshTokens();
+      void st.refreshAmendments();
+    }, 300);
 
     const priceTimer = setInterval(() => {
       void useCommandStore.getState().refreshMarketPrice();
     }, 60_000);
 
     return () => {
+      clearTimeout(deferredInit);
       clearInterval(flushTimer);
       clearInterval(priceTimer);
       for (const u of unsubs) u();
@@ -142,13 +171,17 @@ export const App: React.FC = () => {
             </div>
           )}
 
-          {activeTab === 'globe' && <ValidatorGlobe3D />}
-          {activeTab === 'validators' && <ValidatorDeck />}
-          {activeTab === 'tokens' && <TokenExplorer />}
-          {activeTab === 'wallets' && <WalletDeck />}
-          {activeTab === 'primitives' && <PrimitivesDeck />}
-          {activeTab === 'nodeops' && <NodeOpsDeck />}
-          {activeTab === 'analytics' && <AnalyticsDeck />}
+          {activeTab !== 'command' && (
+            <Suspense fallback={<DeckFallback />}>
+              {activeTab === 'globe' && <ValidatorGlobe3D />}
+              {activeTab === 'validators' && <ValidatorDeck />}
+              {activeTab === 'tokens' && <TokenExplorer />}
+              {activeTab === 'wallets' && <WalletDeck />}
+              {activeTab === 'primitives' && <PrimitivesDeck />}
+              {activeTab === 'nodeops' && <NodeOpsDeck />}
+              {activeTab === 'analytics' && <AnalyticsDeck />}
+            </Suspense>
+          )}
         </main>
       </div>
 
@@ -156,6 +189,7 @@ export const App: React.FC = () => {
       <CommandPalette />
       <TxConfirmModal />
       <QuickStartModal />
+      <PerfHudPill />
     </div>
   );
 };

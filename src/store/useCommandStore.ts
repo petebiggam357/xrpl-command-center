@@ -10,6 +10,7 @@ import type {
   NetworkId,
   NodeConnectionConfig,
   NodeOpsSnapshot,
+  SavedEndpointProfile,
   StreamStatus,
   TokenOnLedgerReport,
   TokenRecord,
@@ -25,6 +26,7 @@ import type {
   WatchlistEntry,
 } from '../shared/types';
 import { DEFAULT_ADDRESS_BOOK_CONTACTS } from '../shared/betaUtils';
+import { playAlertPing } from '../services/alertAudio';
 import { getXrplBridge } from '../services/xrplBridge';
 
 export type NavTab =
@@ -46,6 +48,27 @@ const NODE_CONFIG_STORAGE_KEY = 'xrpl-cc-nodeops-v1';
 const CONTACTS_STORAGE_KEY = 'xrpl-cc-contacts-v1';
 const WHALE_THRESHOLD_STORAGE_KEY = 'xrpl-cc-whale-threshold-v1';
 const QUICKSTART_SEEN_KEY = 'xrpl-cc-quickstart-seen-v1';
+const SAVED_ENDPOINTS_KEY = 'xrpl-cc-endpoints-v1';
+
+function loadSavedEndpoints(): SavedEndpointProfile[] {
+  try {
+    const raw = localStorage.getItem(SAVED_ENDPOINTS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as SavedEndpointProfile[];
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch {
+    // ignore
+  }
+  return [
+    {
+      id: 'ep-local-rippled',
+      label: 'Local rippled (127.0.0.1:6006)',
+      wsUrl: 'ws://127.0.0.1:6006/',
+      createdAt: 1735689600000,
+    },
+  ];
+}
 
 function loadSavedContacts(): AddressBookContact[] {
   try {
@@ -184,6 +207,12 @@ interface CommandState {
   whaleThresholdXrp: number;
   quickStartOpen: boolean;
 
+  // v0.1.2-beta: Multi-Wallet Aggregate Net Worth, Saved Endpoints, Audio Ping & Perf HUD
+  walletBalancesMap: Record<string, number>;
+  savedEndpoints: SavedEndpointProfile[];
+  soundAlertsEnabled: boolean;
+  showPerfHud: boolean;
+
   // Actions
   setActiveTab: (tab: NavTab) => void;
   togglePaused: () => void;
@@ -228,6 +257,13 @@ interface CommandState {
   setWhaleThresholdXrp: (threshold: number) => void;
   setQuickStartOpen: (open: boolean) => void;
   dismissQuickStart: () => void;
+
+  // v0.1.2-beta Actions
+  refreshAllWalletBalances: () => Promise<void>;
+  addSavedEndpoint: (label: string, wsUrl: string) => void;
+  removeSavedEndpoint: (id: string) => void;
+  toggleSoundAlerts: () => void;
+  togglePerfHud: () => void;
 }
 
 const initialCounts: Record<TxCategory, number> = {
@@ -323,6 +359,11 @@ export const useCommandStore = create<CommandState>((set, get) => ({
   whaleThresholdXrp: loadWhaleThreshold(),
   quickStartOpen: loadQuickStartInitialOpen(),
 
+  walletBalancesMap: {},
+  savedEndpoints: loadSavedEndpoints(),
+  soundAlertsEnabled: false,
+  showPerfHud: false,
+
   setActiveTab: (tab) => set({ activeTab: tab }),
   togglePaused: () => set((s) => ({ paused: !s.paused })),
   toggleReducedMotion: () => set((s) => ({ reducedMotion: !s.reducedMotion })),
@@ -410,6 +451,14 @@ export const useCommandStore = create<CommandState>((set, get) => ({
 
     if (shouldRefreshPortfolio) {
       void get().refreshWalletPortfolio();
+    }
+
+    if (state.soundAlertsEnabled) {
+      if (newAlerts.length > 0) {
+        playAlertPing('watchlist');
+      } else if (txs.some((t) => t.isWhale || t.amountXrpEstimate >= state.whaleThresholdXrp)) {
+        playAlertPing('whale');
+      }
     }
 
     set((s) => {
@@ -627,7 +676,14 @@ export const useCommandStore = create<CommandState>((set, get) => ({
     try {
       const snap = await getXrplBridge().walletFetchPortfolio(acct.address);
       if (get().selectedWalletId === acct.id) {
-        set({ walletPortfolio: snap, walletPortfolioLoading: false });
+        set((s) => ({
+          walletPortfolio: snap,
+          walletPortfolioLoading: false,
+          walletBalancesMap: {
+            ...s.walletBalancesMap,
+            [acct.address]: snap.totalXrp,
+          },
+        }));
       }
     } catch {
       set({ walletPortfolioLoading: false });
@@ -801,4 +857,63 @@ export const useCommandStore = create<CommandState>((set, get) => ({
     }
     set({ quickStartOpen: false });
   },
+
+  refreshAllWalletBalances: async () => {
+    const accounts = get().vaultStatus.accounts;
+    if (accounts.length === 0) return;
+    const bridge = getXrplBridge();
+    const updates: Record<string, number> = {};
+    await Promise.all(
+      accounts.slice(0, 16).map(async (acct) => {
+        try {
+          const res = await bridge.rpcRequest('account_info', {
+            account: acct.address,
+            ledger_index: 'validated',
+          });
+          const data = (res.result as { account_data?: { Balance?: string } } | undefined)?.account_data;
+          const drops = Number(data?.Balance ?? 0);
+          updates[acct.address] = Number.isFinite(drops) ? Number((drops / 1_000_000).toFixed(6)) : 0;
+        } catch {
+          updates[acct.address] = 0;
+        }
+      })
+    );
+    set((s) => ({ walletBalancesMap: { ...s.walletBalancesMap, ...updates } }));
+  },
+
+  addSavedEndpoint: (label, wsUrl) =>
+    set((s) => {
+      const cleanUrl = wsUrl.trim();
+      if (!cleanUrl) return s;
+      const filtered = s.savedEndpoints.filter((e) => e.wsUrl !== cleanUrl);
+      const next: SavedEndpointProfile[] = [
+        {
+          id: `ep-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+          label: label.trim() || cleanUrl,
+          wsUrl: cleanUrl,
+          createdAt: Date.now(),
+        },
+        ...filtered,
+      ];
+      try {
+        localStorage.setItem(SAVED_ENDPOINTS_KEY, JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return { savedEndpoints: next };
+    }),
+
+  removeSavedEndpoint: (id) =>
+    set((s) => {
+      const next = s.savedEndpoints.filter((e) => e.id !== id);
+      try {
+        localStorage.setItem(SAVED_ENDPOINTS_KEY, JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return { savedEndpoints: next };
+    }),
+
+  toggleSoundAlerts: () => set((s) => ({ soundAlertsEnabled: !s.soundAlertsEnabled })),
+  togglePerfHud: () => set((s) => ({ showPerfHud: !s.showPerfHud })),
 }));

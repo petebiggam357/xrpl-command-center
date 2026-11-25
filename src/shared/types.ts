@@ -799,6 +799,13 @@ export interface VaultBackupResult {
   error?: string;
 }
 
+export interface SavedEndpointProfile {
+  id: string;
+  label: string;
+  wsUrl: string;
+  createdAt: number;
+}
+
 export interface XrplDesktopApi {
   isElectron: true;
   platform: string;

@@ -12,6 +12,7 @@ import {
   KeyRound,
   Lock,
   Plus,
+  Printer,
   QrCode,
   RefreshCw,
   Repeat,
@@ -28,7 +29,7 @@ import {
   Wallet as WalletIcon,
   Wand2,
 } from 'lucide-react';
-import { connectLedgerXrpAccount } from '../services/ledgerWebHid';
+import { openPrintableRecoverySheet } from '../services/hardwareWallets';
 import { getXrplBridge } from '../services/xrplBridge';
 import {
   checkDestinationTagSafety,
@@ -43,6 +44,7 @@ import { shortenAddress } from '../shared/xrplCodec';
 import { useCommandStore } from '../store/useCommandStore';
 import { AddressBookPanel } from './AddressBookPanel';
 import { DexDepthCanvas } from './DexDepthCanvas';
+import { HardwareWalletModal } from './HardwareWalletModal';
 
 type WalletSubTab = 'portfolio' | 'send-trust' | 'contacts' | 'dex-amm' | 'escrow-nft' | 'multisig';
 
@@ -68,9 +70,13 @@ export const WalletDeck: React.FC = () => {
   const inspectQuery = useCommandStore((s) => s.inspectQuery);
   const contacts = useCommandStore((s) => s.contacts);
   const marketPrice = useCommandStore((s) => s.marketPrice);
+  const walletBalancesMap = useCommandStore((s) => s.walletBalancesMap);
+  const refreshAllWalletBalances = useCommandStore((s) => s.refreshAllWalletBalances);
 
   const [subTab, setSubTab] = useState<WalletSubTab>('portfolio');
   const [txHistorySearch, setTxHistorySearch] = useState('');
+  const [hardwareModalOpen, setHardwareModalOpen] = useState(false);
+  const [syncingAllBalances, setSyncingAllBalances] = useState(false);
 
   // Vault & Onboarding
   const [passphrase, setPassphrase] = useState('');
@@ -154,25 +160,21 @@ export const WalletDeck: React.FC = () => {
   const activeAccount = vaultStatus.accounts.find((a) => a.id === selectedWalletId) ?? null;
   const isCustodial = activeAccount?.kind === 'custodial';
 
-  const handleConnectLedgerUsb = async () => {
-    setVaultBannerMsg(null);
-    const res = await connectLedgerXrpAccount("44'/144'/0'/0/0");
-    if (!res.ok || !res.address) {
-      setVaultBannerMsg({ ok: false, text: res.error ?? 'Ledger USB connection cancelled' });
-      return;
+  const combinedVaultXrp = useMemo(() => {
+    let sum = 0;
+    for (const acct of vaultStatus.accounts) {
+      sum += walletBalancesMap[acct.address] ?? 0;
     }
-    const added = await getXrplBridge().walletAddWatchOnly(
-      res.deviceName || 'Ledger Hardware',
-      res.address,
-      true,
-      "44'/144'/0'/0/0"
-    );
-    await refreshVaultStatus();
-    if (added.account) await selectWallet(added.account.id);
-    setVaultBannerMsg({
-      ok: true,
-      text: `Connected Ledger USB (${res.address}). Pre-flight transactions can be exported via QR / signed hardware payload.`,
-    });
+    return sum;
+  }, [vaultStatus.accounts, walletBalancesMap]);
+
+  const handleSyncAllWalletBalances = async () => {
+    setSyncingAllBalances(true);
+    try {
+      await refreshAllWalletBalances();
+    } finally {
+      setSyncingAllBalances(false);
+    }
   };
 
   const handleVaultSubmit = async (e: React.FormEvent) => {
@@ -674,11 +676,11 @@ export const WalletDeck: React.FC = () => {
 
             <button
               type="button"
-              onClick={() => void handleConnectLedgerUsb()}
+              onClick={() => setHardwareModalOpen(true)}
               className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-violet-500/15 border border-violet-400/40 text-xs font-mono text-violet-200 hover:bg-violet-500/25"
             >
               <Cpu className="w-3.5 h-3.5" />
-              Ledger USB
+              Cold / Hardware
             </button>
 
             <button
@@ -772,10 +774,40 @@ export const WalletDeck: React.FC = () => {
 
       {/* Main Split */}
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
-        <div className="xl:col-span-3 hud-panel rounded-xl p-3.5 space-y-2 h-fit">
-          <div className="text-[10px] font-mono uppercase tracking-[0.16em] text-slate-400 px-1">
-            Tracked Wallets ({vaultStatus.accounts.length})
+        <div className="xl:col-span-3 hud-panel rounded-xl p-3.5 space-y-2.5 h-fit">
+          <div className="flex items-center justify-between px-1">
+            <div className="text-[10px] font-mono uppercase tracking-[0.16em] text-slate-400">
+              Tracked Wallets ({vaultStatus.accounts.length})
+            </div>
+            {vaultStatus.accounts.length > 0 && (
+              <button
+                type="button"
+                disabled={syncingAllBalances}
+                onClick={() => void handleSyncAllWalletBalances()}
+                className="text-[10px] font-mono text-cyan-300 hover:text-cyan-200 flex items-center gap-1 disabled:opacity-50"
+                title="Refresh combined XRP net worth across all wallets"
+              >
+                <RefreshCw className={`w-3 h-3 ${syncingAllBalances ? 'animate-spin' : ''}`} />
+                Sync All
+              </button>
+            )}
           </div>
+
+          {vaultStatus.accounts.length > 0 && (
+            <div className="rounded-xl bg-slate-950/90 border border-cyan-400/25 px-3 py-2 font-mono">
+              <div className="text-[9px] uppercase tracking-wider text-slate-500">
+                Combined Portfolio Net Worth
+              </div>
+              <div className="text-sm font-bold text-white tabular-nums mt-0.5">
+                {combinedVaultXrp.toLocaleString(undefined, { maximumFractionDigits: 2 })} XRP
+              </div>
+              {marketPrice.xrpUsd !== null && (
+                <div className="text-[10px] text-emerald-300 tabular-nums">
+                  ≈ {formatUsd(combinedVaultXrp * marketPrice.xrpUsd)} USD
+                </div>
+              )}
+            </div>
+          )}
 
           {vaultStatus.accounts.length === 0 ? (
             <div className="py-8 px-2 text-center text-xs font-mono text-slate-500">
@@ -891,6 +923,24 @@ export const WalletDeck: React.FC = () => {
                     >
                       <QrCode className="w-3.5 h-3.5 text-cyan-400" />
                       Receive QR
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const opened = openPrintableRecoverySheet(activeAccount, walletPortfolio?.qrSvg);
+                        if (!opened) {
+                          setVaultBannerMsg({
+                            ok: false,
+                            text: 'Pop-up window blocked — unable to open Printable Cold Recovery Sheet.',
+                          });
+                        }
+                      }}
+                      title="Open offline printable Cold Recovery Sheet (leaves secret seed blank for handwriting)"
+                      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-xs font-mono text-slate-200 hover:border-emerald-400/50"
+                    >
+                      <Printer className="w-3.5 h-3.5 text-emerald-400" />
+                      Paper Sheet
                     </button>
 
                     {streamStatus.networkId === 'testnet' || streamStatus.networkId === 'devnet' ? (
@@ -2269,6 +2319,15 @@ export const WalletDeck: React.FC = () => {
           </div>
         </div>
       )}
+
+      <HardwareWalletModal
+        open={hardwareModalOpen}
+        onClose={() => setHardwareModalOpen(false)}
+        onPaired={(accountId, message) => {
+          void refreshVaultStatus().then(() => selectWallet(accountId));
+          setVaultBannerMsg({ ok: true, text: message });
+        }}
+      />
     </div>
   );
 };

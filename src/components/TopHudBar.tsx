@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import {
   Activity,
+  Gauge,
   HelpCircle,
   Lock,
   Pause,
@@ -8,7 +9,10 @@ import {
   Radio,
   Search,
   Sparkles,
+  Trash2,
   Unlock,
+  Volume2,
+  VolumeX,
   Wifi,
   WifiOff,
 } from 'lucide-react';
@@ -24,14 +28,22 @@ export const TopHudBar: React.FC = () => {
   const vaultStatus = useCommandStore((s) => s.vaultStatus);
   const paused = useCommandStore((s) => s.paused);
   const reducedMotion = useCommandStore((s) => s.reducedMotion);
+  const soundAlertsEnabled = useCommandStore((s) => s.soundAlertsEnabled);
+  const showPerfHud = useCommandStore((s) => s.showPerfHud);
+  const savedEndpoints = useCommandStore((s) => s.savedEndpoints);
   const togglePaused = useCommandStore((s) => s.togglePaused);
   const toggleReducedMotion = useCommandStore((s) => s.toggleReducedMotion);
+  const toggleSoundAlerts = useCommandStore((s) => s.toggleSoundAlerts);
+  const togglePerfHud = useCommandStore((s) => s.togglePerfHud);
+  const addSavedEndpoint = useCommandStore((s) => s.addSavedEndpoint);
+  const removeSavedEndpoint = useCommandStore((s) => s.removeSavedEndpoint);
   const connectNetwork = useCommandStore((s) => s.connectNetwork);
   const setCommandPaletteOpen = useCommandStore((s) => s.setCommandPaletteOpen);
   const setActiveTab = useCommandStore((s) => s.setActiveTab);
   const setQuickStartOpen = useCommandStore((s) => s.setQuickStartOpen);
 
   const [customUrlOpen, setCustomUrlOpen] = useState(false);
+  const [customLabel, setCustomLabel] = useState('');
   const [customWsUrl, setCustomWsUrl] = useState('ws://127.0.0.1:6006/');
 
   const handleNetworkChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -47,6 +59,10 @@ export const TopHudBar: React.FC = () => {
   const submitCustomEndpoint = (e: React.FormEvent) => {
     e.preventDefault();
     if (!customWsUrl.trim()) return;
+    if (customLabel.trim()) {
+      addSavedEndpoint(customLabel.trim(), customWsUrl.trim());
+      setCustomLabel('');
+    }
     setCustomUrlOpen(false);
     void connectNetwork('custom', customWsUrl.trim());
   };
@@ -65,7 +81,7 @@ export const TopHudBar: React.FC = () => {
                 XRPL Command Center
               </span>
               <span className="px-1.5 py-0.5 rounded bg-cyan-500/15 border border-cyan-400/30 font-mono text-[10px] text-cyan-300">
-                v0.1.1-beta
+                v0.1.2-beta
               </span>
             </div>
             <div className="text-[10px] font-mono text-slate-400 truncate max-w-[230px]">
@@ -93,11 +109,51 @@ export const TopHudBar: React.FC = () => {
           {customUrlOpen && (
             <form
               onSubmit={submitCustomEndpoint}
-              className="absolute top-10 left-0 z-50 w-80 p-3 rounded-xl hud-panel border border-cyan-400/40 shadow-2xl space-y-2"
+              className="absolute top-10 left-0 z-50 w-96 p-3.5 rounded-xl hud-panel border border-cyan-400/40 shadow-2xl space-y-2.5"
             >
               <label className="block text-[11px] font-mono text-cyan-300 uppercase">
-                Custom / Local rippled WebSocket URL
+                Custom / Saved rippled &amp; Clio Endpoints
               </label>
+
+              {savedEndpoints.length > 0 && (
+                <div className="space-y-1 max-h-32 overflow-y-auto">
+                  {savedEndpoints.map((ep) => (
+                    <div
+                      key={ep.id}
+                      className="flex items-center justify-between gap-1.5 px-2 py-1 rounded-lg bg-slate-950/90 border border-slate-800 hover:border-cyan-400/40"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCustomWsUrl(ep.wsUrl);
+                          setCustomUrlOpen(false);
+                          void connectNetwork('custom', ep.wsUrl);
+                        }}
+                        className="text-left min-w-0 flex-1"
+                      >
+                        <div className="text-[11px] font-semibold text-white truncate">{ep.label}</div>
+                        <div className="text-[10px] font-mono text-cyan-300/80 truncate">{ep.wsUrl}</div>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => removeSavedEndpoint(ep.id)}
+                        className="p-1 text-slate-500 hover:text-rose-300"
+                        title="Remove saved endpoint"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <input
+                type="text"
+                value={customLabel}
+                onChange={(e) => setCustomLabel(e.target.value)}
+                placeholder="Save Profile Name (e.g. Home NVMe Node)"
+                className="w-full rounded-lg bg-slate-950 border border-slate-700 px-2.5 py-1.5 text-xs font-mono text-white focus:outline-none focus:border-cyan-400"
+              />
               <input
                 type="text"
                 value={customWsUrl}
@@ -117,7 +173,7 @@ export const TopHudBar: React.FC = () => {
                   type="submit"
                   className="px-3 py-1 rounded-lg bg-cyan-500/20 border border-cyan-400/50 text-xs font-medium text-cyan-200 hover:bg-cyan-500/30"
                 >
-                  Connect
+                  Connect{customLabel.trim() ? ' & Save' : ''}
                 </button>
               </div>
             </form>
@@ -228,6 +284,32 @@ export const TopHudBar: React.FC = () => {
           <kbd className="px-1.5 py-0.5 rounded bg-slate-800 text-[10px] font-mono text-slate-400">
             Ctrl+K
           </kbd>
+        </button>
+
+        <button
+          type="button"
+          onClick={toggleSoundAlerts}
+          title={soundAlertsEnabled ? 'Mute Whale & Watchlist audio ping' : 'Enable subtle audio ping for Whale & Watchlist alerts'}
+          className={`p-2 rounded-lg border transition-colors ${
+            soundAlertsEnabled
+              ? 'bg-emerald-500/20 border-emerald-400/50 text-emerald-300'
+              : 'bg-slate-950/90 border-slate-800 text-slate-400 hover:border-cyan-400/50 hover:text-slate-200'
+          }`}
+        >
+          {soundAlertsEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
+        </button>
+
+        <button
+          type="button"
+          onClick={togglePerfHud}
+          title="Toggle Live FPS & Memory Performance HUD"
+          className={`p-2 rounded-lg border transition-colors ${
+            showPerfHud
+              ? 'bg-cyan-500/20 border-cyan-400/50 text-cyan-300'
+              : 'bg-slate-950/90 border-slate-800 text-slate-400 hover:border-cyan-400/50 hover:text-slate-200'
+          }`}
+        >
+          <Gauge className="w-3.5 h-3.5" />
         </button>
 
         <button

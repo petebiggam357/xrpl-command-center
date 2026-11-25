@@ -7,6 +7,8 @@ fs.mkdirSync(outDir, { recursive: true });
 
 const shared = {
   bundle: true,
+  minify: true,
+  treeShaking: true,
   platform: 'node',
   target: 'node20',
   format: 'cjs',

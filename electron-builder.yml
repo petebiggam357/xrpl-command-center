@@ -8,6 +8,22 @@ files:
   - dist/**/*
   - dist-electron/**/*
   - package.json
+  - "!node_modules/three/**"
+  - "!node_modules/xrpl/**"
+  - "!node_modules/ripple-binary-codec/**"
+  - "!node_modules/ripple-keypairs/**"
+  - "!node_modules/ripple-address-codec/**"
+  - "!node_modules/lucide-react/**"
+  - "!node_modules/react/**"
+  - "!node_modules/react-dom/**"
+  - "!node_modules/qrcode/**"
+  - "!node_modules/zustand/**"
+  - "!node_modules/@noble/**"
+  - "!node_modules/@xrplf/**"
+  - "!node_modules/**/*.map"
+  - "!node_modules/**/*.d.ts"
+  - "!node_modules/**/README*"
+  - "!node_modules/**/CHANGELOG*"
 extraResources:
   - from: build/icon.png
     to: icon.png
@@ -16,7 +32,9 @@ extraResources:
 asar: true
 asarUnpack:
   - node_modules/sql.js/dist/*.wasm
-compression: normal
+electronLanguages:
+  - en-US
+compression: maximum
 linux:
   category: Network;Development;Utility
   icon: build/icons

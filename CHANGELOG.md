@@ -2,6 +2,22 @@
 
 All notable changes to **XRPL Command Center** are documented in this file.
 
+## [0.1.2-beta] - 2026-11-25
+
+### Added & Improved
+- **Track 1 — Speed & File-Size Diet (Smaller Binaries + Instant Cold Boot):**
+  - Enabled `esbuild` minification & tree-shaking for `dist-electron/main.js`, pruned duplicate already-bundled `node_modules` (`three`, `xrpl`, `lucide-react`, `react`, `qrcode`, `@noble`) from `app.asar`, restricted Chromium locales to `en-US`, and enabled `compression: maximum` in `electron-builder.yml`.
+  - Code-split all 7 secondary modules (`3D Globe`, `Validators`, `Tokens`, `Wallets`, `Institutional`, `Node Ops`, `Analytics`) via `React.lazy()` + `<Suspense>` and deferred directory fetches by 300ms so cold startup only parses the Command Deck.
+- **Track 2 — Multi-Wallet Combined Net Worth & Offline Printable Cold Recovery Sheet:**
+  - Added a **Combined Portfolio Net Worth** card in the `Wallets` sidebar summing XRP + live USD across all tracked wallets with 1-click **Sync All**.
+  - Added a 1-click **Paper Sheet** generator (`openPrintableRecoverySheet`) that opens an offline, print-ready cold recovery sheet with wallet address, QR code, and handwritten seed lines (never prints plaintext seeds).
+- **Track 3 — Live FPS/Memory Performance HUD & Optional Whale/Watchlist Audio Ping:**
+  - Added a zero-asset WebAudio synth chime (`src/services/alertAudio.ts`, muted by default) for Whale Radar & Watchlist alerts plus a toggleable live **FPS / TPS / Latency / Heap MB** diagnostic pill (`PerfHudPill.tsx`).
+- **Track 4 — Saved Custom Node Endpoint Profiles (`Top HUD Bar`):**
+  - Save, switch, and manage multiple custom `rippled` / Clio WebSocket profiles right from the Top HUD Bar network selector.
+- **Track 5 — Open-SDK Cold & Hardware Wallet Hub (`HardwareWalletModal.tsx`):**
+  - Expanded hardware wallet support beyond **Ledger USB (WebHID `0x2c97`)** to include **Trezor (Safe 3 / Safe 5 / Model T via local Trezor Bridge `127.0.0.1:21325` & WebUSB `0x1209` / `0x534c`)**, **Keystone 3 Pro**, **Tangem**, **D'CENT / Ellipal**, and **Xaman** cold wallets routed to Air-Gapped QR & Signed Blob broadcasting.
+
 ## [0.1.1-beta] - 2026-11-25
 
 ### Added
