@@ -159,7 +159,7 @@ npm run dist:mac     # -> release/XRPL-Command-Center-0.1.3-beta-mac-arm64.dmg
 | Top Bar **Pause** | Freeze live animations while background telemetry, SQLite logging & alerts keep running |
 | Top Bar **Sparkles** | Toggle **Reduced Motion** mode for low-power laptops |
 
-- **Cold-Boot & Binary Size Optimization:** All 7 secondary decks (`3D Globe`, `Validators`, `Tokens`, `Wallets`, `Institutional`, `Node Ops`, `Analytics`) are code-split via `React.lazy()` so startup only parses the Command Deck (~71% less startup JS), `dist-electron/main.js` is minified with `esbuild`, duplicate bundled `node_modules` are pruned from `app.asar`, and installers use `compression: maximum` (`~85 MB` Linux AppImage).
+- **Cold-Boot & Binary Size Optimization:** All 8 secondary decks (`3D Globe`, `Validators`, `Tokens`, `Wallets`, `Institutional`, `Node Ops`, `Analytics`, `XRPL Academy`) are code-split via `React.lazy()` so startup only parses the Command Deck (~71% less startup JS), `dist-electron/main.js` is minified with `esbuild`, duplicate bundled `node_modules` are pruned from `app.asar`, and installers trim unused Chromium locales (`~108 MB` fast-mount Linux AppImage).
 
 ---
 

@@ -34,7 +34,7 @@ asarUnpack:
   - node_modules/sql.js/dist/*.wasm
 electronLanguages:
   - en-US
-compression: maximum
+compression: normal
 linux:
   category: Network;Development;Utility
   icon: build/icons
