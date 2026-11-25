@@ -1,5 +1,16 @@
 export type NetworkId = 'mainnet' | 'testnet' | 'devnet' | 'custom';
 
+export type NavTab =
+  | 'command'
+  | 'globe'
+  | 'validators'
+  | 'tokens'
+  | 'wallets'
+  | 'primitives'
+  | 'nodeops'
+  | 'analytics'
+  | 'education';
+
 export interface NetworkPreset {
   id: NetworkId;
   label: string;

@@ -5,6 +5,7 @@ import {
   Coins,
   Database,
   Globe2,
+  GraduationCap,
   Plus,
   Radar,
   Server,
@@ -29,6 +30,7 @@ const NAV_ITEMS: Array<{
   { id: 'primitives', label: 'Institutional', subtitle: 'MPT, Oracles, DID & TOML', icon: Building2 },
   { id: 'nodeops', label: 'My Node Ops', subtitle: 'Docker, Config & Admin', icon: Server },
   { id: 'analytics', label: 'Analytics & Tray', subtitle: 'SQLite, CSV & Updater', icon: Database },
+  { id: 'education', label: 'XRPL Academy', subtitle: 'Docs, Labs & Guide', icon: GraduationCap },
 ];
 
 export const SidebarNav: React.FC = () => {

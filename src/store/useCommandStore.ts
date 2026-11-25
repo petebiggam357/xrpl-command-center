@@ -7,6 +7,7 @@ import type {
   LedgerSnapshot,
   LiveTransaction,
   MarketPriceSnapshot,
+  NavTab,
   NetworkId,
   NodeConnectionConfig,
   NodeOpsSnapshot,
@@ -29,15 +30,7 @@ import { DEFAULT_ADDRESS_BOOK_CONTACTS } from '../shared/betaUtils';
 import { playAlertPing } from '../services/alertAudio';
 import { getXrplBridge } from '../services/xrplBridge';
 
-export type NavTab =
-  | 'command'
-  | 'globe'
-  | 'validators'
-  | 'tokens'
-  | 'wallets'
-  | 'primitives'
-  | 'nodeops'
-  | 'analytics';
+export type { NavTab };
 
 const MAX_LEDGERS = 36;
 const MAX_TX_FEED = 180;

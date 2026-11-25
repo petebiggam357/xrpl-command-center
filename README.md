@@ -33,6 +33,7 @@
 | **Institutional Studio** | Issue **Multi-Purpose Tokens (`MPTokenIssuanceCreate`, `MPTokenAuthorize`)**, manage regulated **`Clawback` (`XLS-39`)**, generate & lint **`xrp-ledger.toml`** with 1-click `AccountSet` domain linking, query & publish **XLS-47 Price Oracles (`get_aggregate_price` / `OracleSet`)**, and resolve/anchor **XLS-40 W3C DIDs (`DIDSet`)**. |
 | **My Node Ops & Docker** | **1-Click Cross-Platform Docker `xrpld` Launcher** (Mainnet/Testnet/Devnet, loopback-only admin `127.0.0.1:5005`), **Custom Storage Drive & Folder Picker** (store multi-GB/TB `NuDB`/`RocksDB` ledger history on any internal NVMe or external SSD with live free-space monitoring), **Visual `rippled.cfg` & `validators.txt` Diff Studio** with timestamped `.bak` auto-backups, SSH-tunneled admin telemetry, and local `debug.log` tailer. |
 | **Analytics, Tray & Updater** | Embedded **WebAssembly SQLite (`command-center.sqlite`)** recording ledger throughput & tracked wallet transaction journals, **1-click CSV accounting export**, **OS System Tray Mode**, **30s Background Node Watchdog**, and `electron-updater` release checks. |
+| **XRPL Academy (Education)** | Built-in interactive XRP Ledger & Command Center education hub with **10 deep lessons** (Consensus/UNL, Reserves, Destination Tags/X-Addresses, TrustLines, CLOB + XLS-30 AMM, Escrows/Checks/NFTs, Rust Vault & Hardware Custody, Institutional MPT/Oracles/DIDs, Self-Hosted Nodes & Command Center Tour), **mastery progress tracking**, **Interactive Reserve & Fee Simulator**, **20-term searchable XRPL Glossary**, and **12 curated official XRPL docs & explorer links**. |
 
 ---
 
@@ -115,7 +116,7 @@ npm run dev
 ```bash
 cargo test --manifest-path rust-vault/Cargo.toml  # Rust Argon2id + ed25519/secp256k1 unit tests
 npm run typecheck                                 # Strict TS checks for renderer & Electron
-npm test                                          # 24 Vitest tests across 6 suites
+npm test                                          # 29 Vitest tests across 8 suites
 npm run build                                     # Vite + esbuild + staged Rust sidecar
 ```
 

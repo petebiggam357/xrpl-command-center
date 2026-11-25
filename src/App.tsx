@@ -37,6 +37,9 @@ const NodeOpsDeck = lazy(() =>
 const AnalyticsDeck = lazy(() =>
   import('./components/AnalyticsDeck').then((m) => ({ default: m.AnalyticsDeck }))
 );
+const EducationDeck = lazy(() =>
+  import('./components/EducationDeck').then((m) => ({ default: m.EducationDeck }))
+);
 
 const DeckFallback: React.FC = () => (
   <div className="hud-panel rounded-xl p-10 text-center font-mono text-xs text-cyan-300">
@@ -180,6 +183,7 @@ export const App: React.FC = () => {
               {activeTab === 'primitives' && <PrimitivesDeck />}
               {activeTab === 'nodeops' && <NodeOpsDeck />}
               {activeTab === 'analytics' && <AnalyticsDeck />}
+              {activeTab === 'education' && <EducationDeck />}
             </Suspense>
           )}
         </main>

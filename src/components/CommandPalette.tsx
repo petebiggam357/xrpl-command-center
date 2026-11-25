@@ -31,6 +31,7 @@ export const CommandPalette: React.FC = () => {
     { tab: 'primitives', label: 'Institutional Primitives', hint: 'MPT, XLS-47 Oracles, DID & xrp-ledger.toml' },
     { tab: 'nodeops', label: 'My Node Ops & Docker', hint: '1-Click Docker Node & rippled.cfg Diff Studio' },
     { tab: 'analytics', label: 'SQLite Analytics & System', hint: 'CSV Accounting Export, Tray Watchdog & Updater' },
+    { tab: 'education', label: 'XRPL Academy & Guide', hint: 'Deep XRPL Curriculum, Reserve Lab, Glossary & Docs' },
   ];
 
   return (
