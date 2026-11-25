@@ -174,6 +174,18 @@ npm run dist:mac     # -> release/XRPL-Command-Center-0.1.3-beta-mac-arm64.dmg
 
 ---
 
+## Support & Donations
+
+**XRPL Command Center** is 100% free and open-source. If you find it useful and want to support ongoing development, you can send an optional XRP / XRPL donation to:
+
+```text
+rNTfyfJaYFbcqSwTKxNwTC322zFziC5LiE
+```
+
+*(Classic XRPL address — no Destination Tag required.)*
+
+---
+
 ## License
 
 Licensed under the [MIT License](LICENSE).
