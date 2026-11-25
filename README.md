@@ -31,7 +31,7 @@
 | **Tokens, DEX & AMM Explorer** | Global XRPL token index (`s1.xrplmeta.org`) + live-stream discovery + **authoritative on-ledger verification** (`account_info`, `gateway_balances`, `book_offers`, `amm_info`), issuer risk flags (`Blackholed`, `GlobalFreeze`, `NoFreeze`, `Clawback`), and **60fps CLOB Depth Wall + AMM `x·y=k` Curve Canvas**. |
 | **Wallets & Pro DeFi Studio** | Process-isolated **Rust Argon2id + AES-256-GCM + Zeroize Vault**, 1-click encrypted **`.xrplvault` Backup/Restore**, **Smart Address Book & Exchange Destination-Tag Guard**, **X-Address decode**, live **USD Portfolio & Reserve Meter**, searchable **Tx History + UTF-8 Memo Decoder**, **Visual NFT Gallery**, **Ledger USB (WebHID)**, **Air-Gapped QR**, **Native Multi-Sign**, **Smart Pathfinding Swap**, `OfferCreate`/`Cancel`, `AMMCreate`/`AMMVote`/`Deposit`/`Withdraw`, Escrows, Checks, and **1-Click Testnet Playground**. |
 | **Institutional Studio** | Issue **Multi-Purpose Tokens (`MPTokenIssuanceCreate`, `MPTokenAuthorize`)**, manage regulated **`Clawback` (`XLS-39`)**, generate & lint **`xrp-ledger.toml`** with 1-click `AccountSet` domain linking, query & publish **XLS-47 Price Oracles (`get_aggregate_price` / `OracleSet`)**, and resolve/anchor **XLS-40 W3C DIDs (`DIDSet`)**. |
-| **My Node Ops & Docker** | **1-Click Cross-Platform Docker `xrpld` Launcher** (Mainnet/Testnet/Devnet, loopback-only admin `127.0.0.1:5005`), **Visual `rippled.cfg` & `validators.txt` Diff Studio** with timestamped `.bak` auto-backups, SSH-tunneled admin telemetry (`peers`, `feature`, `can_delete`), local `debug.log` tailer, and confirmation-gated admin RPCs. |
+| **My Node Ops & Docker** | **1-Click Cross-Platform Docker `xrpld` Launcher** (Mainnet/Testnet/Devnet, loopback-only admin `127.0.0.1:5005`), **Custom Storage Drive & Folder Picker** (store multi-GB/TB `NuDB`/`RocksDB` ledger history on any internal NVMe or external SSD with live free-space monitoring), **Visual `rippled.cfg` & `validators.txt` Diff Studio** with timestamped `.bak` auto-backups, SSH-tunneled admin telemetry, and local `debug.log` tailer. |
 | **Analytics, Tray & Updater** | Embedded **WebAssembly SQLite (`command-center.sqlite`)** recording ledger throughput & tracked wallet transaction journals, **1-click CSV accounting export**, **OS System Tray Mode**, **30s Background Node Watchdog**, and `electron-updater` release checks. |
 
 ---
@@ -40,24 +40,29 @@
 
 ```mermaid
 flowchart LR
-  subgraph EXT["XRPL Network, Docker & Hardware"]
+  subgraph EXT["XRPL Network, Docker, Storage & Hardware"]
     PUB["XRPL WS Clusters (Mainnet / Testnet / Devnet)"]
-    VHS["XRPLF VHS & XRPL Meta APIs"]
+    VHS["XRPLF VHS, XRPL Meta, XRPScan & Spot Price APIs"]
     DOCKER["Local Docker Engine (xrpld Container)"]
+    DRIVE["Custom Storage Drive (Internal NVMe / External SSD)"]
     HW["Ledger USB WebHID & Air-Gapped QR"]
   end
 
+  subgraph RUST["Process-Isolated Rust Sidecar (Zero Network)"]
+    RV["xrpl-vault-sidecar (Argon2id + AES-256-GCM + Zeroize)"]
+  end
+
   subgraph MAIN["Electron Main Process (Isolated Security Boundary)"]
-    STREAM["Resilient WS Failover Pool"]
-    VAULT["Encrypted Vault + Multi-Sig Combiner"]
-    DOCKSVC["DockerNodeService + Config Diff Studio"]
+    STREAM["Resilient WS Failover Pool + 25s Stall Watchdog"]
+    VAULT["Vault Orchestrator + X-Address + .xrplvault Backup"]
+    DOCKSVC["DockerNodeService + Drive Picker + Config Diff"]
     SQL["SQLite Analytics (sql.js) + CSV Export"]
     TRAY["System Tray Watchdog + AutoUpdater"]
   end
 
-  subgraph UI["Renderer Cockpit (React + TS + Canvas2D + Three.js)"]
-    DECK["Command Deck + 3D Globe + Validators + Tokens"]
-    WALLET["Wallets, PathSwap, AMM Curve & Multi-Sig"]
+  subgraph UI["Renderer Cockpit (React + TS + 60fps Canvas2D + Three.js)"]
+    DECK["Command Deck + 3D Globe + Validators/Amendments + Tokens"]
+    WALLET["Wallets, Address Book, PathSwap, AMM Curve & NFT Gallery"]
     PRIM["Institutional (MPT, Oracles, DID, TOML)"]
     NODE["My Node Ops + Docker + Analytics"]
   end
@@ -65,7 +70,9 @@ flowchart LR
   PUB --> STREAM
   VHS --> STREAM
   DOCKER --> DOCKSVC
+  DRIVE --> DOCKSVC
   HW --> WALLET
+  RV <--> VAULT
   STREAM --> SQL
   STREAM --> TRAY
   VAULT --> STREAM
@@ -80,34 +87,36 @@ flowchart LR
 
 ## Quick Start
 
-### Option 1: Launch a Packaged Release (`v0.0.3-alpha`)
+### Option 1: Launch a Packaged Release (`v0.1.1-beta`)
 
 Download the package for your operating system from the **Releases** page:
 
 - **Linux (`.AppImage`):**
   ```bash
-  chmod +x XRPL-Command-Center-0.0.3-alpha-linux-x86_64.AppImage
-  ./XRPL-Command-Center-0.0.3-alpha-linux-x86_64.AppImage
+  chmod +x XRPL-Command-Center-0.1.1-beta-linux-x86_64.AppImage
+  ./XRPL-Command-Center-0.1.1-beta-linux-x86_64.AppImage
   ```
-  > **Ubuntu / Debian tip:** If AppArmor user-namespace restrictions or missing FUSE2 prevent direct launch, run with `--appimage-extract-and-run --no-sandbox`.
-- **Windows (`.exe`):** Run `XRPL-Command-Center-0.0.3-alpha-win-x64-nsis.exe` (installer) or the `portable.exe` standalone binary.
+  > **Ubuntu / Debian tip:** If AppArmor user-namespace restrictions or missing FUSE2 prevent direct launch, run with `--appimage-extract-and-run --no-sandbox`. On first AppImage launch, the desktop dock icon is automatically registered in `~/.local/share/icons` and `~/.local/share/applications`.
+- **Windows (`.exe`):** Run `XRPL-Command-Center-0.1.1-beta-win-x64-nsis.exe` (installer) or the `portable.exe` standalone binary.
 - **macOS (`.dmg`):** Open the `arm64` (Apple Silicon) or `x64` (Intel) `.dmg` and drag **XRPL Command Center** to Applications.
 
 ### Option 2: Run From Source (Development)
 
-**Prerequisites:** Node.js `>=18.19` (Node 20 LTS recommended) and `npm`.
+**Prerequisites:** Node.js `>=18.19` (Node 20 LTS recommended), `npm`, and Rust (`cargo` / `rustc`) for compiling the native vault sidecar.
 
 ```bash
 npm install
+npm run build:rust
 npm run dev
 ```
 
 ### Verification & Tests
 
 ```bash
-npm run typecheck   # Strict TS checks for both renderer & Electron main/preload
-npm test            # Vitest suite (codecs, vault, Ledger APDU, AMM curve, TOML, SQLite/CSV)
-npm run build       # Production Vite bundle + esbuild Electron main/preload
+cargo test --manifest-path rust-vault/Cargo.toml  # Rust Argon2id + ed25519/secp256k1 unit tests
+npm run typecheck                                 # Strict TS checks for renderer & Electron
+npm test                                          # 24 Vitest tests across 6 suites
+npm run build                                     # Vite + esbuild + staged Rust sidecar
 ```
 
 ---
@@ -116,9 +125,10 @@ npm run build       # Production Vite bundle + esbuild Electron main/preload
 
 Open **My Node Ops** in the left navigation rail:
 
-1. **1-Click Local Docker Node:** Open **1-Click Docker Node**, pick Network (`Mainnet` / `Testnet` / `Devnet`), Hardware Sizing (`16 GB` / `32 GB` / `64 GB+`), and Backend (`NuDB` / `RocksDB`), then click **Provision & Launch**. Admin RPC (`127.0.0.1:5005`) and WS (`127.0.0.1:6006`) are bound strictly to loopback.
-2. **Visual `rippled.cfg` Diff Studio:** Edit `rippled.cfg` and `validators.txt` with live red/green unified line diffs and automatic timestamped `.bak` backups before saving.
-3. **Remote VPS (Secure SSH Tunnel):**
+1. **Choose a Storage Drive / Folder:** In **1-Click Docker Node**, click **Browse Drive / Folder…** to pick any fast internal NVMe, secondary hard drive, or external SSD for your `NuDB` / `RocksDB` ledger database. Free disk space is checked live (`fs.statfs`) with low-space warnings (`< 30 GB`).
+2. **1-Click Local Docker Node:** Pick Network (`Mainnet` / `Testnet` / `Devnet`), Hardware Sizing (`16 GB` / `32 GB` / `64 GB+`), and Backend (`NuDB` / `RocksDB`), then click **Provision & Launch**. Admin RPC (`127.0.0.1:5005`) and WS (`127.0.0.1:6006`) are bound strictly to loopback.
+3. **Visual `rippled.cfg` Diff Studio:** Edit `rippled.cfg` and `validators.txt` with live red/green unified line diffs and automatic timestamped `.bak` backups before saving.
+4. **Remote VPS (Secure SSH Tunnel):**
    ```bash
    ssh -N -L 5005:127.0.0.1:5005 -L 6006:127.0.0.1:6006 user@your-xrpl-node
    ```
@@ -129,9 +139,9 @@ Open **My Node Ops** in the left navigation rail:
 ## Cross-Platform Packaging
 
 ```bash
-npm run dist:linux   # -> release/XRPL-Command-Center-0.0.2-alpha-linux-x86_64.AppImage
-npm run dist:win     # -> release/XRPL-Command-Center-0.0.2-alpha-win-x64-nsis.exe (+ portable)
-npm run dist:mac     # -> release/XRPL-Command-Center-0.0.2-alpha-mac-{arm64,x64}.dmg
+npm run dist:linux   # -> release/XRPL-Command-Center-0.1.1-beta-linux-x86_64.AppImage
+npm run dist:win     # -> release/XRPL-Command-Center-0.1.1-beta-win-x64-nsis.exe (+ portable)
+npm run dist:mac     # -> release/XRPL-Command-Center-0.1.1-beta-mac-{arm64,x64}.dmg
 ```
 
 ---
@@ -141,7 +151,8 @@ npm run dist:mac     # -> release/XRPL-Command-Center-0.0.2-alpha-mac-{arm64,x64
 | Control | Action |
 | :--- | :--- |
 | `Ctrl+K` / `Cmd+K` | Open Universal Command Palette (inspect address, tx hash, ledger, or switch modules) |
-| `Esc` | Close Command Palette, Signing Modal, or Inspector Drawer |
+| `Esc` | Close Command Palette, Signing Modal, Quick-Start, or Inspector Drawer |
+| Top Bar **?** | Re-open the Quick-Start Guide & 1-Click Testnet Playground anytime |
 | Top Bar **Pause** | Freeze live animations while background telemetry, SQLite logging & alerts keep running |
 | Top Bar **Sparkles** | Toggle **Reduced Motion** mode for low-power laptops |
 
@@ -150,6 +161,8 @@ npm run dist:mac     # -> release/XRPL-Command-Center-0.0.2-alpha-mac-{arm64,x64
 ## Security & Vault Architecture
 
 - **Process-Isolated Rust Cryptographic Vault (`rust-vault/xrpl-vault-sidecar`):** Secret seeds are encrypted at rest in `userData/wallet-vault-rust.enc.json` (`0600` permissions) using **Argon2id** (`64 MiB, 3 iterations`) + **AES-256-GCM**. Decrypted keys live exclusively inside the separate native Rust process in `Zeroizing` buffers that deterministically wipe RAM to `0x00` on lock, timeout, or exit—private keys never enter Node.js/V8 memory during transaction signing (`ed25519-dalek` & RFC-6979 low-S `k256`).
+- **1-Click Encrypted `.xrplvault` Backups:** Export and restore portable encrypted backups (Argon2id + AES-256-GCM ciphertext only—plaintext seeds are never written to disk) with automatic `.bak` snapshots before restore.
+- **Exchange Destination-Tag Guard & X-Address Support:** Automatically warns before sending to known exchanges (Coinbase, Kraken, Bitstamp, Binance, Uphold, KuCoin, Crypto.com) or saved tagged contacts without a Destination Tag, and natively decodes XRPL X-Addresses.
 - **Hardened Electron Session:** Strict CSP, `contextIsolation: true`, `nodeIntegration: false`, renderer `sandbox: true`, top-level navigation lock (`will-navigate`), and permission denial (permitting only Ledger USB `0x2c97` over WebHID).
 - **Hardware & Air-Gapped Signing:** Connect Ledger devices directly over Chromium WebHID (`vendorId: 0x2c97`), export unsigned canonical `tx_json` QR codes, or combine M-of-N `SignerListSet` partial multi-signatures.
 - **Human-in-the-Loop Pre-Flight Gate:** Every transaction runs live `Sequence`, `Fee` cap, unfunded-reserve, and `lsfRequireDestTag` checks before presenting a network-aware (`MAINNET` high-visibility alert vs. `TESTNET`/`DEVNET`) confirmation modal.
