@@ -4,6 +4,7 @@ import {
   Check,
   Clock,
   Copy,
+  Cpu,
   Droplets,
   Eye,
   KeyRound,
@@ -11,19 +12,23 @@ import {
   Plus,
   QrCode,
   RefreshCw,
+  Route,
   Send,
   ShieldCheck,
   Sparkles,
   Trash2,
   Unlock,
+  Users,
   Wallet as WalletIcon,
 } from 'lucide-react';
+import { connectLedgerXrpAccount } from '../services/ledgerWebHid';
 import { getXrplBridge } from '../services/xrplBridge';
-import type { WalletAlgorithm, WalletCheckEntry } from '../shared/types';
+import type { PathFindQuote, WalletAlgorithm, WalletCheckEntry } from '../shared/types';
 import { shortenAddress } from '../shared/xrplCodec';
 import { useCommandStore } from '../store/useCommandStore';
+import { DexDepthCanvas } from './DexDepthCanvas';
 
-type WalletSubTab = 'portfolio' | 'send-trust' | 'dex-amm' | 'escrow-nft';
+type WalletSubTab = 'portfolio' | 'send-trust' | 'dex-amm' | 'escrow-nft' | 'multisig';
 
 const TRUSTLINE_PRESETS = [
   { label: 'RLUSD (Ripple USD)', currency: 'RLUSD', issuer: 'rMxCKbEDwqr76QuheSUMdEGf4B9xJ8m5De' },
@@ -48,7 +53,7 @@ export const WalletDeck: React.FC = () => {
 
   const [subTab, setSubTab] = useState<WalletSubTab>('portfolio');
 
-  // Vault setup/unlock & account onboarding modals
+  // Vault & Onboarding
   const [passphrase, setPassphrase] = useState('');
   const [vaultBannerMsg, setVaultBannerMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [modalMode, setModalMode] = useState<'create' | 'import' | 'watch' | 'qr' | null>(null);
@@ -61,7 +66,7 @@ export const WalletDeck: React.FC = () => {
   const [copiedAddr, setCopiedAddr] = useState(false);
   const [faucetLoading, setFaucetLoading] = useState(false);
 
-  // 1) Payment & TrustSet form state
+  // 1) Payment & TrustSet
   const [payDest, setPayDest] = useState('');
   const [payAssetKey, setPayAssetKey] = useState('XRP');
   const [payAmount, setPayAmount] = useState('');
@@ -72,7 +77,14 @@ export const WalletDeck: React.FC = () => {
   const [tlIssuer, setTlIssuer] = useState('rMxCKbEDwqr76QuheSUMdEGf4B9xJ8m5De');
   const [tlLimit, setTlLimit] = useState('1000000');
 
-  // 2) DEX & AMM form state
+  // 2) Pro DEX, Smart Pathfinding & AMM
+  const [swapTargetCurrency, setSwapTargetCurrency] = useState('RLUSD');
+  const [swapTargetIssuer, setSwapTargetIssuer] = useState('rMxCKbEDwqr76QuheSUMdEGf4B9xJ8m5De');
+  const [swapTargetAmount, setSwapTargetAmount] = useState('25');
+  const [swapSlippagePct, setSwapSlippagePct] = useState('1.0');
+  const [pathQuote, setPathQuote] = useState<PathFindQuote | null>(null);
+  const [pathFinding, setPathFinding] = useState(false);
+
   const [dexSide, setDexSide] = useState<'buy' | 'sell'>('buy');
   const [dexTokenCurrency, setDexTokenCurrency] = useState('RLUSD');
   const [dexTokenIssuer, setDexTokenIssuer] = useState('rMxCKbEDwqr76QuheSUMdEGf4B9xJ8m5De');
@@ -80,14 +92,15 @@ export const WalletDeck: React.FC = () => {
   const [dexXrpTotal, setDexXrpTotal] = useState('');
   const [dexOrderMode, setDexOrderMode] = useState<'limit' | 'passive' | 'ioc' | 'fok'>('limit');
 
-  const [ammAction, setAmmAction] = useState<'deposit' | 'withdraw'>('deposit');
+  const [ammAction, setAmmAction] = useState<'deposit' | 'withdraw' | 'create' | 'vote'>('deposit');
   const [ammTokenCurrency, setAmmTokenCurrency] = useState('RLUSD');
   const [ammTokenIssuer, setAmmTokenIssuer] = useState('rMxCKbEDwqr76QuheSUMdEGf4B9xJ8m5De');
   const [ammXrpAmount, setAmmXrpAmount] = useState('');
   const [ammTokenAmount, setAmmTokenAmount] = useState('');
+  const [ammFeeBpsInput, setAmmFeeBpsInput] = useState('30');
   const [ammWithdrawAll, setAmmWithdrawAll] = useState(false);
 
-  // 3) Escrow, Check & NFT form state
+  // 3) Escrow, Check & NFT
   const [escrowDest, setEscrowDest] = useState('');
   const [escrowXrp, setEscrowXrp] = useState('');
   const [escrowMinutes, setEscrowMinutes] = useState('60');
@@ -103,12 +116,45 @@ export const WalletDeck: React.FC = () => {
   const [nftOfferPriceXrp, setNftOfferPriceXrp] = useState('0');
   const [activeNftOfferId, setActiveNftOfferId] = useState<string | null>(null);
 
+  // 4) Multi-Sig & Air-Gapped Coordinator
+  const [msQuorum, setMsQuorum] = useState('2');
+  const [msSigner1, setMsSigner1] = useState('');
+  const [msWeight1, setMsWeight1] = useState('1');
+  const [msSigner2, setMsSigner2] = useState('');
+  const [msWeight2, setMsWeight2] = useState('1');
+  const [msUnsignedJson, setMsUnsignedJson] = useState(
+    '{\n  "TransactionType": "Payment",\n  "Account": "",\n  "Destination": "",\n  "Amount": "1000000",\n  "Sequence": 1,\n  "Fee": "36"\n}'
+  );
+  const [msPartialBlobsText, setMsPartialBlobsText] = useState('');
+  const [msStatusBanner, setMsStatusBanner] = useState<{ ok: boolean; text: string } | null>(null);
+
   useEffect(() => {
     void refreshVaultStatus();
   }, [refreshVaultStatus]);
 
   const activeAccount = vaultStatus.accounts.find((a) => a.id === selectedWalletId) ?? null;
   const isCustodial = activeAccount?.kind === 'custodial';
+
+  const handleConnectLedgerUsb = async () => {
+    setVaultBannerMsg(null);
+    const res = await connectLedgerXrpAccount("44'/144'/0'/0/0");
+    if (!res.ok || !res.address) {
+      setVaultBannerMsg({ ok: false, text: res.error ?? 'Ledger USB connection cancelled' });
+      return;
+    }
+    const added = await getXrplBridge().walletAddWatchOnly(
+      res.deviceName || 'Ledger Hardware',
+      res.address,
+      true,
+      "44'/144'/0'/0/0"
+    );
+    await refreshVaultStatus();
+    if (added.account) await selectWallet(added.account.id);
+    setVaultBannerMsg({
+      ok: true,
+      text: `Connected Ledger USB (${res.address}). Pre-flight transactions can be exported via QR / signed hardware payload.`,
+    });
+  };
 
   const handleVaultSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -205,6 +251,41 @@ export const WalletDeck: React.FC = () => {
     setTimeout(() => setCopiedAddr(false), 1600);
   };
 
+  const handleFindSwapPath = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeAccount) return;
+    setPathFinding(true);
+    const destAsset =
+      swapTargetCurrency.trim().toUpperCase() === 'XRP'
+        ? { currency: 'XRP', value: swapTargetAmount.trim() }
+        : {
+            currency: swapTargetCurrency.trim(),
+            issuer: swapTargetIssuer.trim(),
+            value: swapTargetAmount.trim(),
+          };
+    const quote = await getXrplBridge().dexFindBestPath({
+      sourceAccount: activeAccount.address,
+      destinationAccount: activeAccount.address,
+      destinationAsset: destAsset,
+      slippagePct: Number(swapSlippagePct) || 1.0,
+    });
+    setPathQuote(quote);
+    setPathFinding(false);
+  };
+
+  const handleExecutePathSwap = () => {
+    if (!activeAccount || !pathQuote || !pathQuote.ok) return;
+    void openTxConfirmModal(activeAccount.id, {
+      kind: 'Payment',
+      account: activeAccount.address,
+      destination: activeAccount.address,
+      asset: pathQuote.destinationAmountSpec,
+      sendMax: pathQuote.sendMaxSpec,
+      deliverMin: pathQuote.deliverMinSpec,
+      paths: pathQuote.pathsComputed,
+    });
+  };
+
   const submitPaymentForm = (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeAccount) return;
@@ -250,7 +331,6 @@ export const WalletDeck: React.FC = () => {
       issuer: dexTokenIssuer.trim(),
       value: dexTokenAmount.trim(),
     };
-    // In XRPL OfferCreate: TakerGets = what WE give/sell; TakerPays = what WE receive/buy
     void openTxConfirmModal(activeAccount.id, {
       kind: 'OfferCreate',
       account: activeAccount.address,
@@ -266,7 +346,27 @@ export const WalletDeck: React.FC = () => {
     const asset1 = { currency: 'XRP' };
     const asset2 = { currency: ammTokenCurrency.trim(), issuer: ammTokenIssuer.trim() };
 
-    if (ammAction === 'deposit') {
+    if (ammAction === 'create') {
+      void openTxConfirmModal(activeAccount.id, {
+        kind: 'AMMCreate',
+        account: activeAccount.address,
+        amount1: { currency: 'XRP', value: ammXrpAmount.trim() },
+        amount2: {
+          currency: ammTokenCurrency.trim(),
+          issuer: ammTokenIssuer.trim(),
+          value: ammTokenAmount.trim(),
+        },
+        tradingFeeBps: Number(ammFeeBpsInput) || 30,
+      });
+    } else if (ammAction === 'vote') {
+      void openTxConfirmModal(activeAccount.id, {
+        kind: 'AMMVote',
+        account: activeAccount.address,
+        asset1,
+        asset2,
+        tradingFeeBps: Number(ammFeeBpsInput) || 30,
+      });
+    } else if (ammAction === 'deposit') {
       void openTxConfirmModal(activeAccount.id, {
         kind: 'AMMDeposit',
         account: activeAccount.address,
@@ -360,6 +460,41 @@ export const WalletDeck: React.FC = () => {
     });
   };
 
+  const handlePartialMultisigSign = async () => {
+    if (!activeAccount) return;
+    setMsStatusBanner(null);
+    try {
+      const parsed = JSON.parse(msUnsignedJson) as Record<string, unknown>;
+      const res = await getXrplBridge().walletSignMultisigPartial(activeAccount.id, parsed);
+      if (!res.ok || !res.txBlob) {
+        setMsStatusBanner({ ok: false, text: res.error ?? 'Partial signature failed' });
+        return;
+      }
+      setMsPartialBlobsText((prev) => (prev.trim() ? `${prev.trim()}\n${res.txBlob}` : res.txBlob!));
+      setMsStatusBanner({
+        ok: true,
+        text: `Appended partial multi-signature from ${res.signerAddress}`,
+      });
+    } catch {
+      setMsStatusBanner({ ok: false, text: 'Invalid JSON in unsigned tx_json editor' });
+    }
+  };
+
+  const handleCombineMultisig = async () => {
+    setMsStatusBanner(null);
+    const blobs = msPartialBlobsText
+      .split(/\r?\n/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const res = await getXrplBridge().walletCombineAndSubmitMultisig(blobs);
+    setMsStatusBanner({
+      ok: res.ok,
+      text: res.ok
+        ? `Multisigned tx broadcast (${res.engineResult ?? 'submitted'}): ${res.hash ?? ''}`
+        : res.error ?? 'Combine failed',
+    });
+  };
+
   return (
     <div className="space-y-4">
       {/* Top Vault Security Header */}
@@ -370,7 +505,7 @@ export const WalletDeck: React.FC = () => {
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan-300">
-                  Encrypted XRPL Wallet Vault &amp; DeFi Studio
+                  Encrypted XRPL Wallet Vault, Hardware USB &amp; Pro DeFi Studio
                 </h2>
                 <span
                   className={`px-2 py-0.5 rounded-full text-[10px] font-mono border ${
@@ -392,7 +527,7 @@ export const WalletDeck: React.FC = () => {
                 )}
               </div>
               <p className="text-[11px] text-slate-400">
-                Keys encrypted at rest (`scrypt` + `AES-256-GCM`) and isolated inside the Electron Main process
+                `scrypt` + `AES-256-GCM` local vault, Ledger USB WebHID, Air-Gapped QR, Multi-Sig &amp; Smart Pathfinding
               </p>
             </div>
           </div>
@@ -418,6 +553,16 @@ export const WalletDeck: React.FC = () => {
                 </button>
               </>
             )}
+
+            <button
+              type="button"
+              onClick={() => void handleConnectLedgerUsb()}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-violet-500/15 border border-violet-400/40 text-xs font-mono text-violet-200 hover:bg-violet-500/25"
+            >
+              <Cpu className="w-3.5 h-3.5" />
+              Ledger USB
+            </button>
+
             <button
               type="button"
               onClick={() => setModalMode('watch')}
@@ -440,7 +585,6 @@ export const WalletDeck: React.FC = () => {
           </div>
         </div>
 
-        {/* Vault Setup / Unlock Inline Bar when Locked */}
         {!vaultStatus.unlocked && (
           <form
             onSubmit={(e) => void handleVaultSubmit(e)}
@@ -488,9 +632,8 @@ export const WalletDeck: React.FC = () => {
         )}
       </div>
 
-      {/* Main Split: Wallet Accounts Sidebar + Active Wallet Cockpit */}
+      {/* Main Split */}
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
-        {/* Account Switcher Column */}
         <div className="xl:col-span-3 hud-panel rounded-xl p-3.5 space-y-2 h-fit">
           <div className="text-[10px] font-mono uppercase tracking-[0.16em] text-slate-400 px-1">
             Tracked Wallets ({vaultStatus.accounts.length})
@@ -498,7 +641,7 @@ export const WalletDeck: React.FC = () => {
 
           {vaultStatus.accounts.length === 0 ? (
             <div className="py-8 px-2 text-center text-xs font-mono text-slate-500">
-              Initialize/unlock your vault to create a signing wallet, or click Watch Address above.
+              Initialize/unlock your vault, connect a Ledger USB device, or add a Watch Address.
             </div>
           ) : (
             <div className="space-y-1.5">
@@ -518,6 +661,8 @@ export const WalletDeck: React.FC = () => {
                       <div className="flex items-center gap-1.5">
                         {acct.kind === 'custodial' ? (
                           <KeyRound className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        ) : acct.kind === 'hardware-ledger' ? (
+                          <Cpu className="w-3.5 h-3.5 text-violet-400 shrink-0" />
                         ) : (
                           <Eye className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
                         )}
@@ -547,20 +692,17 @@ export const WalletDeck: React.FC = () => {
           )}
         </div>
 
-        {/* Active Wallet Cockpit */}
         <div className="xl:col-span-9 space-y-4">
           {!activeAccount ? (
             <div className="hud-panel rounded-xl p-12 text-center space-y-2">
               <WalletIcon className="w-9 h-9 text-cyan-400/50 mx-auto" />
               <div className="text-sm font-semibold text-white">No Wallet Selected</div>
               <p className="text-xs text-slate-400 max-w-md mx-auto">
-                Create a new encrypted XRPL wallet, import an existing family seed, or add any `r...` address in
-                watch-only mode to inspect reserves, tokens, DEX orders, escrows, checks, and NFTs.
+                Create a new encrypted XRPL wallet, import a seed, connect a Ledger USB device, or track a watch-only address.
               </p>
             </div>
           ) : (
             <>
-              {/* Portfolio Balance & Reserve Breakdown Header */}
               <div className="hud-panel rounded-xl p-4 space-y-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
@@ -570,11 +712,22 @@ export const WalletDeck: React.FC = () => {
                         className={`px-2 py-0.5 rounded text-[10px] font-mono ${
                           isCustodial
                             ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-400/30'
-                            : 'bg-slate-800 text-slate-300'
+                            : activeAccount.kind === 'hardware-ledger'
+                              ? 'bg-violet-500/20 text-violet-200 border border-violet-400/40'
+                              : 'bg-slate-800 text-slate-300'
                         }`}
                       >
-                        {isCustodial ? `SIGNING (${activeAccount.algorithm ?? 'ed25519'})` : 'WATCH-ONLY'}
+                        {isCustodial
+                          ? `SIGNING (${activeAccount.algorithm ?? 'ed25519'})`
+                          : activeAccount.kind === 'hardware-ledger'
+                            ? 'LEDGER HARDWARE'
+                            : 'WATCH-ONLY / QR'}
                       </span>
+                      {walletPortfolio?.signerList && (
+                        <span className="px-2 py-0.5 rounded bg-amber-500/15 border border-amber-400/40 text-[10px] font-mono text-amber-200">
+                          Multi-Sig Quorum {walletPortfolio.signerList.signerQuorum}
+                        </span>
+                      )}
                     </div>
                     <div className="mt-1 flex items-center gap-2 font-mono text-xs text-cyan-300">
                       <span>{activeAccount.address}</span>
@@ -582,7 +735,6 @@ export const WalletDeck: React.FC = () => {
                         type="button"
                         onClick={handleCopyAddress}
                         className="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-white"
-                        title="Copy address"
                       >
                         {copiedAddr ? (
                           <Check className="w-3.5 h-3.5 text-emerald-400" />
@@ -618,7 +770,6 @@ export const WalletDeck: React.FC = () => {
                         type="button"
                         onClick={() => void connectNetwork('testnet')}
                         className="px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-[11px] font-mono text-slate-400 hover:text-cyan-300"
-                        title="Switch to XRPL Testnet for free test XRP faucet funding"
                       >
                         Switch to Testnet Faucet
                       </button>
@@ -628,7 +779,7 @@ export const WalletDeck: React.FC = () => {
                       type="button"
                       onClick={() => void refreshWalletPortfolio()}
                       disabled={walletPortfolioLoading}
-                      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-xs font-mono text-slate-200 hover:border-cyan-400/50"
+                      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-xs font-mono text-slate-200"
                     >
                       <RefreshCw className={`w-3.5 h-3.5 ${walletPortfolioLoading ? 'animate-spin text-cyan-400' : ''}`} />
                       Sync
@@ -678,13 +829,14 @@ export const WalletDeck: React.FC = () => {
                 </div>
               </div>
 
-              {/* Wallet Sub-Tabs */}
+              {/* Sub-Tabs */}
               <div className="flex flex-wrap gap-2">
                 {[
                   { id: 'portfolio', label: 'Overview & Activity', icon: WalletIcon },
                   { id: 'send-trust', label: 'Send & TrustLines', icon: Send },
-                  { id: 'dex-amm', label: 'DEX & AMM Trading', icon: ArrowLeftRight },
+                  { id: 'dex-amm', label: 'Pro DEX, PathSwap & AMM', icon: ArrowLeftRight },
                   { id: 'escrow-nft', label: 'Escrows, Checks & NFTs', icon: Sparkles },
+                  { id: 'multisig', label: 'Multi-Sig & Air-Gapped', icon: Users },
                 ].map((t) => {
                   const Icon = t.icon;
                   return (
@@ -705,17 +857,16 @@ export const WalletDeck: React.FC = () => {
                 })}
               </div>
 
-              {/* SUB-TAB 1: PORTFOLIO & ACTIVITY */}
+              {/* SUB-TAB 1: PORTFOLIO */}
               {subTab === 'portfolio' && (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                  {/* Issued Token Balances */}
                   <div className="hud-panel rounded-xl p-4 space-y-2.5">
                     <div className="text-xs font-semibold uppercase tracking-[0.15em] text-cyan-300">
                       Issued Token TrustLines ({walletPortfolio?.tokens.length ?? 0})
                     </div>
                     {(walletPortfolio?.tokens.length ?? 0) === 0 ? (
                       <div className="text-xs font-mono text-slate-500 py-6 text-center">
-                        No TrustLines configured yet. Add RLUSD, SOLO, USD, or any token in Send &amp; TrustLines.
+                        No TrustLines configured yet.
                       </div>
                     ) : (
                       <div className="space-y-1.5 max-h-64 overflow-y-auto">
@@ -732,7 +883,7 @@ export const WalletDeck: React.FC = () => {
                             </div>
                             <div className="flex items-center gap-2">
                               <span className="text-white font-semibold tabular-nums">{tok.balance}</span>
-                              {isCustodial && Number(tok.balance) === 0 && (
+                              {Number(tok.balance) === 0 && (
                                 <button
                                   type="button"
                                   onClick={() =>
@@ -744,8 +895,7 @@ export const WalletDeck: React.FC = () => {
                                       limit: '0',
                                     })
                                   }
-                                  className="px-1.5 py-0.5 rounded bg-rose-500/15 border border-rose-400/30 text-[10px] text-rose-300 hover:bg-rose-500/25"
-                                  title="Remove zero-balance TrustLine and reclaim 0.2 XRP reserve"
+                                  className="px-1.5 py-0.5 rounded bg-rose-500/15 border border-rose-400/30 text-[10px] text-rose-300"
                                 >
                                   Remove
                                 </button>
@@ -757,13 +907,12 @@ export const WalletDeck: React.FC = () => {
                     )}
                   </div>
 
-                  {/* Open DEX Offers + Recent Txs */}
                   <div className="hud-panel rounded-xl p-4 space-y-3">
                     <div className="text-xs font-semibold uppercase tracking-[0.15em] text-amber-300">
                       Open DEX Orders ({walletPortfolio?.offers.length ?? 0})
                     </div>
                     {(walletPortfolio?.offers.length ?? 0) === 0 ? (
-                      <div className="text-xs font-mono text-slate-500 py-2">No active limit orders on the DEX.</div>
+                      <div className="text-xs font-mono text-slate-500 py-2">No active limit orders.</div>
                     ) : (
                       <div className="space-y-1.5 max-h-32 overflow-y-auto">
                         {walletPortfolio!.offers.map((o) => (
@@ -775,21 +924,19 @@ export const WalletDeck: React.FC = () => {
                               <span className="text-amber-200">Give {o.takerGetsDisplay}</span>
                               <span className="text-slate-500"> → Get {o.takerPaysDisplay}</span>
                             </div>
-                            {isCustodial && (
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  void openTxConfirmModal(activeAccount.id, {
-                                    kind: 'OfferCancel',
-                                    account: activeAccount.address,
-                                    offerSequence: o.seq,
-                                  })
-                                }
-                                className="px-2 py-0.5 rounded bg-rose-500/20 border border-rose-400/40 text-[10px] text-rose-200"
-                              >
-                                Cancel #{o.seq}
-                              </button>
-                            )}
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void openTxConfirmModal(activeAccount.id, {
+                                  kind: 'OfferCancel',
+                                  account: activeAccount.address,
+                                  offerSequence: o.seq,
+                                })
+                              }
+                              className="px-2 py-0.5 rounded bg-rose-500/20 border border-rose-400/40 text-[10px] text-rose-200"
+                            >
+                              Cancel #{o.seq}
+                            </button>
                           </div>
                         ))}
                       </div>
@@ -820,7 +967,6 @@ export const WalletDeck: React.FC = () => {
               {/* SUB-TAB 2: SEND & TRUSTLINES */}
               {subTab === 'send-trust' && (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                  {/* Send XRP / Token Payment */}
                   <form onSubmit={submitPaymentForm} className="hud-panel rounded-xl p-4 space-y-3">
                     <div className="flex items-center gap-2">
                       <Send className="w-4 h-4 text-cyan-400" />
@@ -828,90 +974,64 @@ export const WalletDeck: React.FC = () => {
                         Send XRP or Issued Token
                       </h3>
                     </div>
-                    <p className="text-[11px] text-slate-400">
-                      Automatically checks destination `RequireDest` tag enforcement and reserve requirements.
-                    </p>
 
-                    <div>
-                      <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">Asset</label>
-                      <select
-                        value={payAssetKey}
-                        onChange={(e) => setPayAssetKey(e.target.value)}
-                        className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs font-mono text-white"
-                      >
-                        <option value="XRP">XRP (Native)</option>
-                        {(walletPortfolio?.tokens ?? []).map((t) => (
-                          <option key={`${t.currencyRaw}:${t.issuer}`} value={`${t.currencyRaw}:${t.issuer}`}>
-                            {t.currency} (Bal: {t.balance})
-                          </option>
-                        ))}
-                      </select>
-                    </div>
+                    <select
+                      value={payAssetKey}
+                      onChange={(e) => setPayAssetKey(e.target.value)}
+                      className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs font-mono text-white"
+                    >
+                      <option value="XRP">XRP (Native)</option>
+                      {(walletPortfolio?.tokens ?? []).map((t) => (
+                        <option key={`${t.currencyRaw}:${t.issuer}`} value={`${t.currencyRaw}:${t.issuer}`}>
+                          {t.currency} (Bal: {t.balance})
+                        </option>
+                      ))}
+                    </select>
 
-                    <div>
-                      <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">
-                        Destination r-Address
-                      </label>
+                    <input
+                      required
+                      type="text"
+                      value={payDest}
+                      onChange={(e) => setPayDest(e.target.value)}
+                      placeholder="Destination r-Address"
+                      className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs font-mono text-white"
+                    />
+
+                    <div className="grid grid-cols-2 gap-2">
                       <input
                         required
                         type="text"
-                        value={payDest}
-                        onChange={(e) => setPayDest(e.target.value)}
-                        placeholder="r..."
-                        className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs font-mono text-white"
+                        value={payAmount}
+                        onChange={(e) => setPayAmount(e.target.value)}
+                        placeholder="Amount"
+                        className="rounded-lg bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs font-mono text-white"
                       />
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">Amount</label>
-                        <input
-                          required
-                          type="text"
-                          value={payAmount}
-                          onChange={(e) => setPayAmount(e.target.value)}
-                          placeholder="10.5"
-                          className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs font-mono text-white"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">
-                          Destination Tag (Optional)
-                        </label>
-                        <input
-                          type="number"
-                          min="0"
-                          value={payDestTag}
-                          onChange={(e) => setPayDestTag(e.target.value)}
-                          placeholder="e.g. 123456"
-                          className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs font-mono text-white"
-                        />
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">
-                        Public Memo (Optional)
-                      </label>
                       <input
-                        type="text"
-                        value={payMemo}
-                        onChange={(e) => setPayMemo(e.target.value)}
-                        placeholder="Invoice #42"
-                        className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs font-mono text-white"
+                        type="number"
+                        min="0"
+                        value={payDestTag}
+                        onChange={(e) => setPayDestTag(e.target.value)}
+                        placeholder="Dest Tag (Optional)"
+                        className="rounded-lg bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs font-mono text-white"
                       />
                     </div>
+
+                    <input
+                      type="text"
+                      value={payMemo}
+                      onChange={(e) => setPayMemo(e.target.value)}
+                      placeholder="Optional Memo"
+                      className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs font-mono text-white"
+                    />
 
                     <button
                       type="submit"
-                      disabled={!isCustodial}
-                      className="w-full py-2 rounded-xl bg-cyan-500/20 border border-cyan-400/50 text-xs font-mono font-semibold text-cyan-200 hover:bg-cyan-500/30 disabled:opacity-40"
+                      className="w-full py-2 rounded-xl bg-cyan-500/20 border border-cyan-400/50 text-xs font-mono font-semibold text-cyan-200 hover:bg-cyan-500/30"
                     >
-                      {isCustodial ? 'Preview & Sign Payment' : 'Requires Custodial Signing Wallet'}
+                      Preview Payment (Vault or Air-Gapped QR)
                     </button>
                   </form>
 
-                  {/* TrustLine Manager */}
                   <form onSubmit={submitTrustSetForm} className="hud-panel rounded-xl p-4 space-y-3">
                     <div className="flex items-center gap-2">
                       <ShieldCheck className="w-4 h-4 text-emerald-400" />
@@ -937,300 +1057,321 @@ export const WalletDeck: React.FC = () => {
                     </div>
 
                     <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">
-                          Currency Code
-                        </label>
-                        <input
-                          required
-                          type="text"
-                          value={tlCurrency}
-                          onChange={(e) => setTlCurrency(e.target.value)}
-                          placeholder="RLUSD or USD"
-                          className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs font-mono text-white"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">
-                          Trust Limit (0 = Remove)
-                        </label>
-                        <input
-                          required
-                          type="text"
-                          value={tlLimit}
-                          onChange={(e) => setTlLimit(e.target.value)}
-                          placeholder="1000000"
-                          className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs font-mono text-white"
-                        />
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">
-                        Issuer r-Address
-                      </label>
                       <input
                         required
                         type="text"
-                        value={tlIssuer}
-                        onChange={(e) => setTlIssuer(e.target.value)}
-                        placeholder="r..."
-                        className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs font-mono text-white"
+                        value={tlCurrency}
+                        onChange={(e) => setTlCurrency(e.target.value)}
+                        placeholder="Currency"
+                        className="rounded-lg bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs font-mono text-white"
+                      />
+                      <input
+                        required
+                        type="text"
+                        value={tlLimit}
+                        onChange={(e) => setTlLimit(e.target.value)}
+                        placeholder="Limit"
+                        className="rounded-lg bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs font-mono text-white"
                       />
                     </div>
 
-                    <div className="text-[11px] text-slate-400 font-mono">
-                      Enforces `tfSetNoRipple` by default and reserves 0.2 XRP while active.
-                    </div>
+                    <input
+                      required
+                      type="text"
+                      value={tlIssuer}
+                      onChange={(e) => setTlIssuer(e.target.value)}
+                      placeholder="Issuer r-Address"
+                      className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs font-mono text-white"
+                    />
 
                     <button
                       type="submit"
-                      disabled={!isCustodial}
-                      className="w-full py-2 rounded-xl bg-emerald-500/20 border border-emerald-400/50 text-xs font-mono font-semibold text-emerald-200 hover:bg-emerald-500/30 disabled:opacity-40"
+                      className="w-full py-2 rounded-xl bg-emerald-500/20 border border-emerald-400/50 text-xs font-mono font-semibold text-emerald-200 hover:bg-emerald-500/30"
                     >
-                      {isCustodial ? 'Preview & Sign TrustSet' : 'Requires Custodial Signing Wallet'}
+                      Preview TrustSet
                     </button>
                   </form>
                 </div>
               )}
 
-              {/* SUB-TAB 3: NATIVE DEX & AMM TRADING */}
+              {/* SUB-TAB 3: PRO DEX, SMART PATHFINDING & AMM */}
               {subTab === 'dex-amm' && (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                  {/* Native DEX Order Ticket */}
-                  <form onSubmit={submitDexOrder} className="hud-panel rounded-xl p-4 space-y-3">
+                <div className="space-y-4">
+                  {/* Smart Auto-Bridging Pathfinding Swap */}
+                  <div className="hud-panel rounded-xl p-4 space-y-3">
                     <div className="flex items-center justify-between">
-                      <h3 className="text-xs font-semibold uppercase tracking-[0.15em] text-amber-300">
-                        Native DEX Order (`OfferCreate`)
-                      </h3>
-                      <div className="flex rounded-lg overflow-hidden border border-slate-700 font-mono text-[11px]">
-                        <button
-                          type="button"
-                          onClick={() => setDexSide('buy')}
-                          className={`px-2.5 py-1 ${
-                            dexSide === 'buy' ? 'bg-emerald-500/25 text-emerald-200' : 'bg-slate-950 text-slate-400'
-                          }`}
-                        >
-                          BUY TOKEN
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setDexSide('sell')}
-                          className={`px-2.5 py-1 ${
-                            dexSide === 'sell' ? 'bg-rose-500/25 text-rose-200' : 'bg-slate-950 text-slate-400'
-                          }`}
-                        >
-                          SELL TOKEN
-                        </button>
+                      <div className="flex items-center gap-2">
+                        <Route className="w-4 h-4 text-emerald-400" />
+                        <h3 className="text-xs font-semibold uppercase tracking-[0.15em] text-emerald-300">
+                          Smart Auto-Bridging Pathfinding Swap (`ripple_path_find`)
+                        </h3>
                       </div>
+                      <span className="text-[11px] font-mono text-slate-400">
+                        Routes across XRP Auto-Bridge + CLOB + AMM with `DeliverMin` slippage guard
+                      </span>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">
-                          Token Currency
-                        </label>
+                    <form onSubmit={(e) => void handleFindSwapPath(e)} className="grid grid-cols-1 md:grid-cols-12 gap-2">
+                      <input
+                        required
+                        type="text"
+                        value={swapTargetCurrency}
+                        onChange={(e) => setSwapTargetCurrency(e.target.value)}
+                        placeholder="Receive Asset (RLUSD)"
+                        className="md:col-span-2 rounded-lg bg-slate-950 border border-slate-700 px-2.5 py-1.5 text-xs font-mono text-white"
+                      />
+                      <input
+                        type="text"
+                        value={swapTargetIssuer}
+                        onChange={(e) => setSwapTargetIssuer(e.target.value)}
+                        placeholder="Issuer r-Address (blank for XRP)"
+                        className="md:col-span-4 rounded-lg bg-slate-950 border border-slate-700 px-2.5 py-1.5 text-xs font-mono text-white"
+                      />
+                      <input
+                        required
+                        type="text"
+                        value={swapTargetAmount}
+                        onChange={(e) => setSwapTargetAmount(e.target.value)}
+                        placeholder="Target Amount"
+                        className="md:col-span-2 rounded-lg bg-slate-950 border border-slate-700 px-2.5 py-1.5 text-xs font-mono text-white"
+                      />
+                      <select
+                        value={swapSlippagePct}
+                        onChange={(e) => setSwapSlippagePct(e.target.value)}
+                        className="md:col-span-2 rounded-lg bg-slate-950 border border-slate-700 px-2 py-1.5 text-xs font-mono text-white"
+                      >
+                        <option value="0.5">0.5% Slippage</option>
+                        <option value="1.0">1.0% Slippage</option>
+                        <option value="2.5">2.5% Slippage</option>
+                      </select>
+                      <button
+                        type="submit"
+                        disabled={pathFinding}
+                        className="md:col-span-2 py-1.5 rounded-lg bg-emerald-500/20 border border-emerald-400/50 text-xs font-mono text-emerald-200"
+                      >
+                        {pathFinding ? 'Routing…' : 'Find Best Route'}
+                      </button>
+                    </form>
+
+                    {pathQuote && (
+                      <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 flex flex-wrap items-center justify-between gap-3 font-mono text-xs">
+                        {pathQuote.ok ? (
+                          <>
+                            <div>
+                              <span className="text-slate-400">Est. Input: </span>
+                              <strong className="text-cyan-300">{pathQuote.sourceAmountDisplay}</strong>
+                              <span className="text-slate-500 ml-2">({pathQuote.hopsSummary})</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={handleExecutePathSwap}
+                              className="px-3.5 py-1.5 rounded-lg bg-emerald-500/25 border border-emerald-400 text-emerald-100 font-semibold"
+                            >
+                              Preview Protected Swap
+                            </button>
+                          </>
+                        ) : (
+                          <span className="text-amber-300">{pathQuote.error}</span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <form onSubmit={submitDexOrder} className="hud-panel rounded-xl p-4 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-xs font-semibold uppercase tracking-[0.15em] text-amber-300">
+                          CLOB Order (`OfferCreate`)
+                        </h3>
+                        <div className="flex rounded-lg overflow-hidden border border-slate-700 font-mono text-[11px]">
+                          <button
+                            type="button"
+                            onClick={() => setDexSide('buy')}
+                            className={`px-2.5 py-1 ${
+                              dexSide === 'buy' ? 'bg-emerald-500/25 text-emerald-200' : 'bg-slate-950 text-slate-400'
+                            }`}
+                          >
+                            BUY
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setDexSide('sell')}
+                            className={`px-2.5 py-1 ${
+                              dexSide === 'sell' ? 'bg-rose-500/25 text-rose-200' : 'bg-slate-950 text-slate-400'
+                            }`}
+                          >
+                            SELL
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2">
                         <input
                           required
                           type="text"
                           value={dexTokenCurrency}
                           onChange={(e) => setDexTokenCurrency(e.target.value)}
-                          className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs font-mono text-white"
+                          placeholder="Token"
+                          className="rounded-lg bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs font-mono text-white"
                         />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">
-                          Execution Mode
-                        </label>
                         <select
                           value={dexOrderMode}
                           onChange={(e) => setDexOrderMode(e.target.value as typeof dexOrderMode)}
-                          className="w-full rounded-lg bg-slate-950 border border-slate-700 px-2.5 py-1.5 text-xs font-mono text-white"
+                          className="rounded-lg bg-slate-950 border border-slate-700 px-2.5 py-1.5 text-xs font-mono text-white"
                         >
-                          <option value="limit">Limit (Standard)</option>
+                          <option value="limit">Limit</option>
                           <option value="passive">Passive Maker</option>
-                          <option value="ioc">Immediate-or-Cancel (Market)</option>
+                          <option value="ioc">IOC (Market)</option>
                           <option value="fok">Fill-or-Kill</option>
                         </select>
                       </div>
-                    </div>
 
-                    <div>
-                      <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">
-                        Token Issuer r-Address
-                      </label>
                       <input
                         required
                         type="text"
                         value={dexTokenIssuer}
                         onChange={(e) => setDexTokenIssuer(e.target.value)}
+                        placeholder="Issuer r-Address"
                         className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs font-mono text-white"
                       />
-                    </div>
 
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">
-                          Token Quantity ({dexTokenCurrency || 'Token'})
-                        </label>
+                      <div className="grid grid-cols-2 gap-2">
                         <input
                           required
                           type="text"
                           value={dexTokenAmount}
                           onChange={(e) => setDexTokenAmount(e.target.value)}
-                          placeholder="50"
-                          className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs font-mono text-white"
+                          placeholder="Token Qty"
+                          className="rounded-lg bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs font-mono text-white"
                         />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">
-                          Total XRP {dexSide === 'buy' ? 'You Spend' : 'You Receive'}
-                        </label>
                         <input
                           required
                           type="text"
                           value={dexXrpTotal}
                           onChange={(e) => setDexXrpTotal(e.target.value)}
-                          placeholder="25"
-                          className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs font-mono text-white"
+                          placeholder="Total XRP"
+                          className="rounded-lg bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs font-mono text-white"
                         />
                       </div>
-                    </div>
 
-                    <button
-                      type="submit"
-                      disabled={!isCustodial}
-                      className="w-full py-2 rounded-xl bg-amber-500/20 border border-amber-400/50 text-xs font-mono font-semibold text-amber-200 hover:bg-amber-500/30 disabled:opacity-40"
-                    >
-                      {isCustodial
-                        ? `Preview DEX ${dexSide.toUpperCase()} Order`
-                        : 'Requires Custodial Signing Wallet'}
-                    </button>
-                  </form>
+                      <button
+                        type="submit"
+                        className="w-full py-2 rounded-xl bg-amber-500/20 border border-amber-400/50 text-xs font-mono font-semibold text-amber-200"
+                      >
+                        Preview DEX {dexSide.toUpperCase()} Order
+                      </button>
+                    </form>
 
-                  {/* AMM Liquidity Pool Actions */}
-                  <form onSubmit={submitAmmForm} className="hud-panel rounded-xl p-4 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-xs font-semibold uppercase tracking-[0.15em] text-violet-300">
-                        XLS-30 AMM Pool Liquidity
-                      </h3>
-                      <div className="flex rounded-lg overflow-hidden border border-slate-700 font-mono text-[11px]">
-                        <button
-                          type="button"
-                          onClick={() => setAmmAction('deposit')}
-                          className={`px-2.5 py-1 ${
-                            ammAction === 'deposit'
-                              ? 'bg-violet-500/25 text-violet-200'
-                              : 'bg-slate-950 text-slate-400'
-                          }`}
+                    <form onSubmit={submitAmmForm} className="hud-panel rounded-xl p-4 space-y-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <h3 className="text-xs font-semibold uppercase tracking-[0.15em] text-violet-300">
+                          XLS-30 AMM Pool Desk
+                        </h3>
+                        <select
+                          value={ammAction}
+                          onChange={(e) => setAmmAction(e.target.value as typeof ammAction)}
+                          className="rounded-lg bg-slate-950 border border-slate-700 px-2 py-1 text-[11px] font-mono text-violet-200"
                         >
-                          DEPOSIT
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setAmmAction('withdraw')}
-                          className={`px-2.5 py-1 ${
-                            ammAction === 'withdraw'
-                              ? 'bg-cyan-500/25 text-cyan-200'
-                              : 'bg-slate-950 text-slate-400'
-                          }`}
-                        >
-                          WITHDRAW
-                        </button>
+                          <option value="deposit">Deposit Liquidity</option>
+                          <option value="withdraw">Withdraw Liquidity</option>
+                          <option value="create">Create New AMM Pool</option>
+                          <option value="vote">Vote Pool Fee (`AMMVote`)</option>
+                        </select>
                       </div>
-                    </div>
 
-                    <div className="grid grid-cols-3 gap-2">
-                      <div>
-                        <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">
-                          Pool Token
-                        </label>
+                      <div className="grid grid-cols-3 gap-2">
                         <input
                           required
                           type="text"
                           value={ammTokenCurrency}
                           onChange={(e) => setAmmTokenCurrency(e.target.value)}
-                          className="w-full rounded-lg bg-slate-950 border border-slate-700 px-2.5 py-1.5 text-xs font-mono text-white"
+                          placeholder="Token"
+                          className="rounded-lg bg-slate-950 border border-slate-700 px-2.5 py-1.5 text-xs font-mono text-white"
                         />
-                      </div>
-                      <div className="col-span-2">
-                        <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">
-                          Token Issuer
-                        </label>
                         <input
                           required
                           type="text"
                           value={ammTokenIssuer}
                           onChange={(e) => setAmmTokenIssuer(e.target.value)}
-                          className="w-full rounded-lg bg-slate-950 border border-slate-700 px-2.5 py-1.5 text-xs font-mono text-white"
+                          placeholder="Issuer r-Address"
+                          className="col-span-2 rounded-lg bg-slate-950 border border-slate-700 px-2.5 py-1.5 text-xs font-mono text-white"
                         />
                       </div>
-                    </div>
 
-                    {ammAction === 'deposit' ? (
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">
-                            XRP Deposit Amount
-                          </label>
+                      {(ammAction === 'deposit' || ammAction === 'create') && (
+                        <div className="grid grid-cols-2 gap-2">
                           <input
                             required
                             type="text"
                             value={ammXrpAmount}
                             onChange={(e) => setAmmXrpAmount(e.target.value)}
-                            placeholder="10"
-                            className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs font-mono text-white"
+                            placeholder="XRP Amount"
+                            className="rounded-lg bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs font-mono text-white"
                           />
-                        </div>
-                        <div>
-                          <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">
-                            Token Amount (Optional Dual)
-                          </label>
                           <input
+                            required={ammAction === 'create'}
                             type="text"
                             value={ammTokenAmount}
                             onChange={(e) => setAmmTokenAmount(e.target.value)}
-                            placeholder="Leave blank for single-sided"
-                            className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs font-mono text-white"
+                            placeholder={ammAction === 'create' ? 'Seed Token Amount' : 'Optional Dual Token'}
+                            className="rounded-lg bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs font-mono text-white"
                           />
                         </div>
-                      </div>
-                    ) : (
-                      <div className="space-y-2">
-                        <label className="flex items-center gap-2 text-xs font-mono text-slate-300">
-                          <input
-                            type="checkbox"
-                            checked={ammWithdrawAll}
-                            onChange={(e) => setAmmWithdrawAll(e.target.checked)}
-                          />
-                          Withdraw All LP Tokens (`tfWithdrawAll`)
-                        </label>
-                        {!ammWithdrawAll && (
-                          <div>
-                            <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">
-                              Single-Asset XRP Withdraw Amount
-                            </label>
+                      )}
+
+                      {(ammAction === 'create' || ammAction === 'vote') && (
+                        <input
+                          required
+                          type="number"
+                          min="0"
+                          max="100"
+                          value={ammFeeBpsInput}
+                          onChange={(e) => setAmmFeeBpsInput(e.target.value)}
+                          placeholder="Trading Fee bps (0..100 bps)"
+                          className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs font-mono text-white"
+                        />
+                      )}
+
+                      {ammAction === 'withdraw' && (
+                        <div className="space-y-2">
+                          <label className="flex items-center gap-2 text-xs font-mono text-slate-300">
+                            <input
+                              type="checkbox"
+                              checked={ammWithdrawAll}
+                              onChange={(e) => setAmmWithdrawAll(e.target.checked)}
+                            />
+                            Withdraw All LP Tokens
+                          </label>
+                          {!ammWithdrawAll && (
                             <input
                               required
                               type="text"
                               value={ammXrpAmount}
                               onChange={(e) => setAmmXrpAmount(e.target.value)}
-                              placeholder="5"
+                              placeholder="XRP Withdraw Amount"
                               className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs font-mono text-white"
                             />
-                          </div>
-                        )}
-                      </div>
-                    )}
+                          )}
+                        </div>
+                      )}
 
-                    <button
-                      type="submit"
-                      disabled={!isCustodial}
-                      className="w-full py-2 rounded-xl bg-violet-500/20 border border-violet-400/50 text-xs font-mono font-semibold text-violet-200 hover:bg-violet-500/30 disabled:opacity-40"
-                    >
-                      {isCustodial ? `Preview AMM ${ammAction.toUpperCase()}` : 'Requires Custodial Signing Wallet'}
-                    </button>
-                  </form>
+                      <button
+                        type="submit"
+                        className="w-full py-2 rounded-xl bg-violet-500/20 border border-violet-400/50 text-xs font-mono font-semibold text-violet-200"
+                      >
+                        Preview AMM {ammAction.toUpperCase()}
+                      </button>
+                    </form>
+                  </div>
+
+                  {/* Interactive AMM Curve & Depth Simulator */}
+                  <DexDepthCanvas
+                    currencyLabel={ammTokenCurrency || 'TOKEN'}
+                    bids={[]}
+                    asks={[]}
+                    simulatedSwapXrpIn={Number(ammXrpAmount) || 2_500}
+                    ammFeeBps={Number(ammFeeBpsInput) || 30}
+                  />
                 </div>
               )}
 
@@ -1238,7 +1379,6 @@ export const WalletDeck: React.FC = () => {
               {subTab === 'escrow-nft' && (
                 <div className="space-y-4">
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                    {/* Time-Locked XRP Escrow */}
                     <form onSubmit={submitEscrowCreate} className="hud-panel rounded-xl p-4 space-y-3">
                       <div className="flex items-center gap-2">
                         <Clock className="w-4 h-4 text-cyan-400" />
@@ -1246,89 +1386,56 @@ export const WalletDeck: React.FC = () => {
                           Time-Locked XRP Escrow (`EscrowCreate`)
                         </h3>
                       </div>
-
-                      <div>
-                        <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">
-                          Destination (blank = lock to self)
-                        </label>
+                      <input
+                        type="text"
+                        value={escrowDest}
+                        onChange={(e) => setEscrowDest(e.target.value)}
+                        placeholder={`Destination (blank = ${shortenAddress(activeAccount.address)})`}
+                        className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs font-mono text-white"
+                      />
+                      <div className="grid grid-cols-3 gap-2">
                         <input
+                          required
                           type="text"
-                          value={escrowDest}
-                          onChange={(e) => setEscrowDest(e.target.value)}
-                          placeholder={activeAccount.address}
-                          className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs font-mono text-white"
+                          value={escrowXrp}
+                          onChange={(e) => setEscrowXrp(e.target.value)}
+                          placeholder="XRP"
+                          className="rounded-lg bg-slate-950 border border-slate-700 px-2.5 py-1.5 text-xs font-mono text-white"
+                        />
+                        <input
+                          required
+                          type="number"
+                          min="1"
+                          value={escrowMinutes}
+                          onChange={(e) => setEscrowMinutes(e.target.value)}
+                          placeholder="Mins"
+                          className="rounded-lg bg-slate-950 border border-slate-700 px-2.5 py-1.5 text-xs font-mono text-white"
+                        />
+                        <input
+                          type="number"
+                          min="1"
+                          value={escrowCancelHours}
+                          onChange={(e) => setEscrowCancelHours(e.target.value)}
+                          placeholder="+Exp Hrs"
+                          className="rounded-lg bg-slate-950 border border-slate-700 px-2.5 py-1.5 text-xs font-mono text-white"
                         />
                       </div>
-
-                      <div className="grid grid-cols-3 gap-2">
-                        <div>
-                          <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">
-                            XRP Amount
-                          </label>
-                          <input
-                            required
-                            type="text"
-                            value={escrowXrp}
-                            onChange={(e) => setEscrowXrp(e.target.value)}
-                            placeholder="25"
-                            className="w-full rounded-lg bg-slate-950 border border-slate-700 px-2.5 py-1.5 text-xs font-mono text-white"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">
-                            Unlock In (Mins)
-                          </label>
-                          <input
-                            required
-                            type="number"
-                            min="1"
-                            value={escrowMinutes}
-                            onChange={(e) => setEscrowMinutes(e.target.value)}
-                            className="w-full rounded-lg bg-slate-950 border border-slate-700 px-2.5 py-1.5 text-xs font-mono text-white"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">
-                            Expire +Hours
-                          </label>
-                          <input
-                            type="number"
-                            min="1"
-                            value={escrowCancelHours}
-                            onChange={(e) => setEscrowCancelHours(e.target.value)}
-                            placeholder="Optional"
-                            className="w-full rounded-lg bg-slate-950 border border-slate-700 px-2.5 py-1.5 text-xs font-mono text-white"
-                          />
-                        </div>
-                      </div>
-
                       <button
                         type="submit"
-                        disabled={!isCustodial}
-                        className="w-full py-2 rounded-xl bg-cyan-500/20 border border-cyan-400/50 text-xs font-mono font-semibold text-cyan-200 disabled:opacity-40"
+                        className="w-full py-2 rounded-xl bg-cyan-500/20 border border-cyan-400/50 text-xs font-mono font-semibold text-cyan-200"
                       >
                         Preview Time-Locked Escrow
                       </button>
 
                       {(walletPortfolio?.escrows.length ?? 0) > 0 && (
                         <div className="pt-2 border-t border-slate-800 space-y-1.5">
-                          <div className="text-[10px] font-mono uppercase text-slate-400">
-                            Active Escrows ({walletPortfolio!.escrows.length})
-                          </div>
                           {walletPortfolio!.escrows.map((esc) => (
                             <div
                               key={esc.index}
                               className="flex items-center justify-between p-2 rounded bg-slate-950 border border-slate-800 font-mono text-xs"
                             >
-                              <div>
-                                <span className="text-cyan-300 font-bold">{esc.amountXrp} XRP</span>
-                                {esc.finishAfterMs && (
-                                  <span className="text-[10px] text-slate-400 ml-2">
-                                    Unlocks {new Date(esc.finishAfterMs).toLocaleTimeString()}
-                                  </span>
-                                )}
-                              </div>
-                              {isCustodial && esc.offerSequence !== undefined && (
+                              <span className="text-cyan-300 font-bold">{esc.amountXrp} XRP</span>
+                              {esc.offerSequence !== undefined && (
                                 <button
                                   type="button"
                                   onClick={() =>
@@ -1350,54 +1457,37 @@ export const WalletDeck: React.FC = () => {
                       )}
                     </form>
 
-                    {/* Deferred XRP Checks */}
                     <form onSubmit={submitCheckCreate} className="hud-panel rounded-xl p-4 space-y-3">
                       <h3 className="text-xs font-semibold uppercase tracking-[0.15em] text-emerald-300">
                         Deferred XRPL Checks (`CheckCreate` / `CheckCash`)
                       </h3>
-
                       <div className="grid grid-cols-3 gap-2">
-                        <div className="col-span-2">
-                          <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">
-                            Recipient r-Address
-                          </label>
-                          <input
-                            required
-                            type="text"
-                            value={checkDest}
-                            onChange={(e) => setCheckDest(e.target.value)}
-                            placeholder="r..."
-                            className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs font-mono text-white"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">
-                            Max XRP
-                          </label>
-                          <input
-                            required
-                            type="text"
-                            value={checkXrp}
-                            onChange={(e) => setCheckXrp(e.target.value)}
-                            placeholder="15"
-                            className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs font-mono text-white"
-                          />
-                        </div>
+                        <input
+                          required
+                          type="text"
+                          value={checkDest}
+                          onChange={(e) => setCheckDest(e.target.value)}
+                          placeholder="Recipient r-Address"
+                          className="col-span-2 rounded-lg bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs font-mono text-white"
+                        />
+                        <input
+                          required
+                          type="text"
+                          value={checkXrp}
+                          onChange={(e) => setCheckXrp(e.target.value)}
+                          placeholder="Max XRP"
+                          className="rounded-lg bg-slate-950 border border-slate-700 px-2.5 py-1.5 text-xs font-mono text-white"
+                        />
                       </div>
-
                       <button
                         type="submit"
-                        disabled={!isCustodial}
-                        className="w-full py-2 rounded-xl bg-emerald-500/20 border border-emerald-400/50 text-xs font-mono font-semibold text-emerald-200 disabled:opacity-40"
+                        className="w-full py-2 rounded-xl bg-emerald-500/20 border border-emerald-400/50 text-xs font-mono font-semibold text-emerald-200"
                       >
                         Preview CheckCreate
                       </button>
 
                       {(walletPortfolio?.checks.length ?? 0) > 0 && (
                         <div className="pt-2 border-t border-slate-800 space-y-1.5">
-                          <div className="text-[10px] font-mono uppercase text-slate-400">
-                            Pending Checks ({walletPortfolio!.checks.length})
-                          </div>
                           {walletPortfolio!.checks.map((chk) => {
                             const isRecipient = chk.destination === activeAccount.address;
                             return (
@@ -1405,40 +1495,31 @@ export const WalletDeck: React.FC = () => {
                                 key={chk.index}
                                 className="flex items-center justify-between p-2 rounded bg-slate-950 border border-slate-800 font-mono text-xs"
                               >
-                                <div>
-                                  <span className="text-emerald-300 font-bold">{chk.sendMaxDisplay}</span>
-                                  <span className="text-[10px] text-slate-500 ml-2">
-                                    {isRecipient
-                                      ? `From ${shortenAddress(chk.account, 5, 4)}`
-                                      : `To ${shortenAddress(chk.destination, 5, 4)}`}
-                                  </span>
-                                </div>
-                                {isCustodial && (
-                                  <div className="flex gap-1">
-                                    {isRecipient && (
-                                      <button
-                                        type="button"
-                                        onClick={() => submitCashCheck(chk)}
-                                        className="px-2 py-0.5 rounded bg-emerald-500/20 border border-emerald-400/40 text-[10px] text-emerald-200"
-                                      >
-                                        Cash
-                                      </button>
-                                    )}
+                                <span className="text-emerald-300 font-bold">{chk.sendMaxDisplay}</span>
+                                <div className="flex gap-1">
+                                  {isRecipient && (
                                     <button
                                       type="button"
-                                      onClick={() =>
-                                        void openTxConfirmModal(activeAccount.id, {
-                                          kind: 'CheckCancel',
-                                          account: activeAccount.address,
-                                          checkId: chk.index,
-                                        })
-                                      }
-                                      className="px-2 py-0.5 rounded bg-rose-500/20 border border-rose-400/40 text-[10px] text-rose-200"
+                                      onClick={() => submitCashCheck(chk)}
+                                      className="px-2 py-0.5 rounded bg-emerald-500/20 border border-emerald-400/40 text-[10px] text-emerald-200"
                                     >
-                                      Cancel
+                                      Cash
                                     </button>
-                                  </div>
-                                )}
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      void openTxConfirmModal(activeAccount.id, {
+                                        kind: 'CheckCancel',
+                                        account: activeAccount.address,
+                                        checkId: chk.index,
+                                      })
+                                    }
+                                    className="px-2 py-0.5 rounded bg-rose-500/20 border border-rose-400/40 text-[10px] text-rose-200"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
                               </div>
                             );
                           })}
@@ -1447,63 +1528,44 @@ export const WalletDeck: React.FC = () => {
                     </form>
                   </div>
 
-                  {/* XLS-20 NFToken Studio & Gallery */}
                   <div className="hud-panel rounded-xl p-4 space-y-4">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <h3 className="text-xs font-semibold uppercase tracking-[0.15em] text-fuchsia-300">
-                        XLS-20 NFToken Studio &amp; Owned Gallery ({walletPortfolio?.nfts.length ?? 0})
-                      </h3>
-                    </div>
+                    <h3 className="text-xs font-semibold uppercase tracking-[0.15em] text-fuchsia-300">
+                      XLS-20 NFToken Studio &amp; Owned Gallery ({walletPortfolio?.nfts.length ?? 0})
+                    </h3>
 
                     <form onSubmit={submitNftMint} className="grid grid-cols-1 md:grid-cols-12 gap-2 items-end">
-                      <div className="md:col-span-6">
-                        <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">
-                          Metadata URI (ipfs:// or https://)
-                        </label>
-                        <input
-                          required
-                          type="text"
-                          value={nftUri}
-                          onChange={(e) => setNftUri(e.target.value)}
-                          placeholder="ipfs://bafy..."
-                          className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs font-mono text-white"
-                        />
-                      </div>
-                      <div className="md:col-span-2">
-                        <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">
-                          Taxon
-                        </label>
-                        <input
-                          type="number"
-                          min="0"
-                          value={nftTaxon}
-                          onChange={(e) => setNftTaxon(e.target.value)}
-                          className="w-full rounded-lg bg-slate-950 border border-slate-700 px-2.5 py-1.5 text-xs font-mono text-white"
-                        />
-                      </div>
-                      <div className="md:col-span-2">
-                        <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">
-                          Royalty %
-                        </label>
-                        <input
-                          type="number"
-                          min="0"
-                          max="50"
-                          step="0.1"
-                          value={nftRoyaltyPct}
-                          onChange={(e) => setNftRoyaltyPct(e.target.value)}
-                          className="w-full rounded-lg bg-slate-950 border border-slate-700 px-2.5 py-1.5 text-xs font-mono text-white"
-                        />
-                      </div>
-                      <div className="md:col-span-2">
-                        <button
-                          type="submit"
-                          disabled={!isCustodial}
-                          className="w-full py-1.5 rounded-lg bg-fuchsia-500/20 border border-fuchsia-400/50 text-xs font-mono font-semibold text-fuchsia-200 disabled:opacity-40"
-                        >
-                          Mint NFT
-                        </button>
-                      </div>
+                      <input
+                        required
+                        type="text"
+                        value={nftUri}
+                        onChange={(e) => setNftUri(e.target.value)}
+                        placeholder="ipfs://bafy..."
+                        className="md:col-span-6 rounded-lg bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs font-mono text-white"
+                      />
+                      <input
+                        type="number"
+                        min="0"
+                        value={nftTaxon}
+                        onChange={(e) => setNftTaxon(e.target.value)}
+                        placeholder="Taxon"
+                        className="md:col-span-2 rounded-lg bg-slate-950 border border-slate-700 px-2.5 py-1.5 text-xs font-mono text-white"
+                      />
+                      <input
+                        type="number"
+                        min="0"
+                        max="50"
+                        step="0.1"
+                        value={nftRoyaltyPct}
+                        onChange={(e) => setNftRoyaltyPct(e.target.value)}
+                        placeholder="Royalty %"
+                        className="md:col-span-2 rounded-lg bg-slate-950 border border-slate-700 px-2.5 py-1.5 text-xs font-mono text-white"
+                      />
+                      <button
+                        type="submit"
+                        className="md:col-span-2 py-1.5 rounded-lg bg-fuchsia-500/20 border border-fuchsia-400/50 text-xs font-mono font-semibold text-fuchsia-200"
+                      >
+                        Mint NFT
+                      </button>
                     </form>
 
                     {(walletPortfolio?.nfts.length ?? 0) > 0 && (
@@ -1520,35 +1582,30 @@ export const WalletDeck: React.FC = () => {
                             <div className="text-[11px] text-slate-300 truncate">
                               {nft.uriDecoded ?? shortenAddress(nft.nftokenId, 10, 8)}
                             </div>
-
-                            {isCustodial && (
-                              <div className="flex gap-1.5 pt-1">
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    setActiveNftOfferId(
-                                      activeNftOfferId === nft.nftokenId ? null : nft.nftokenId
-                                    )
-                                  }
-                                  className="flex-1 py-1 rounded bg-cyan-500/15 border border-cyan-400/30 text-[10px] text-cyan-200"
-                                >
-                                  Sell / Transfer
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    void openTxConfirmModal(activeAccount.id, {
-                                      kind: 'NFTokenBurn',
-                                      account: activeAccount.address,
-                                      nftokenId: nft.nftokenId,
-                                    })
-                                  }
-                                  className="px-2 py-1 rounded bg-rose-500/15 border border-rose-400/30 text-[10px] text-rose-200"
-                                >
-                                  Burn
-                                </button>
-                              </div>
-                            )}
+                            <div className="flex gap-1.5 pt-1">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setActiveNftOfferId(activeNftOfferId === nft.nftokenId ? null : nft.nftokenId)
+                                }
+                                className="flex-1 py-1 rounded bg-cyan-500/15 border border-cyan-400/30 text-[10px] text-cyan-200"
+                              >
+                                Sell / Transfer
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  void openTxConfirmModal(activeAccount.id, {
+                                    kind: 'NFTokenBurn',
+                                    account: activeAccount.address,
+                                    nftokenId: nft.nftokenId,
+                                  })
+                                }
+                                className="px-2 py-1 rounded bg-rose-500/15 border border-rose-400/30 text-[10px] text-rose-200"
+                              >
+                                Burn
+                              </button>
+                            </div>
 
                             {activeNftOfferId === nft.nftokenId && (
                               <div className="pt-2 border-t border-slate-800 space-y-1.5">
@@ -1556,14 +1613,14 @@ export const WalletDeck: React.FC = () => {
                                   type="text"
                                   value={nftOfferPriceXrp}
                                   onChange={(e) => setNftOfferPriceXrp(e.target.value)}
-                                  placeholder="Price XRP (0 = free transfer)"
+                                  placeholder="Price XRP (0 = free)"
                                   className="w-full rounded bg-slate-900 border border-slate-700 px-2 py-1 text-[11px] text-white"
                                 />
                                 <input
                                   type="text"
                                   value={nftTransferDest}
                                   onChange={(e) => setNftTransferDest(e.target.value)}
-                                  placeholder="Optional buyer/recipient r-address"
+                                  placeholder="Optional recipient r-address"
                                   className="w-full rounded bg-slate-900 border border-slate-700 px-2 py-1 text-[11px] text-white"
                                 />
                                 <button
@@ -1580,7 +1637,7 @@ export const WalletDeck: React.FC = () => {
                                   }
                                   className="w-full py-1 rounded bg-emerald-500/20 border border-emerald-400/40 text-[10px] text-emerald-200"
                                 >
-                                  Sign NFT Sell Offer
+                                  Preview NFT Offer
                                 </button>
                               </div>
                             )}
@@ -1591,12 +1648,147 @@ export const WalletDeck: React.FC = () => {
                   </div>
                 </div>
               )}
+
+              {/* SUB-TAB 5: MULTI-SIG & AIR-GAPPED COORDINATOR */}
+              {subTab === 'multisig' && (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      const signers = [
+                        { account: msSigner1.trim(), weight: Number(msWeight1) || 1 },
+                        ...(msSigner2.trim()
+                          ? [{ account: msSigner2.trim(), weight: Number(msWeight2) || 1 }]
+                          : []),
+                      ].filter((s) => s.account);
+                      void openTxConfirmModal(activeAccount.id, {
+                        kind: 'SignerListSet',
+                        account: activeAccount.address,
+                        signerQuorum: Number(msQuorum) || 1,
+                        signers,
+                      });
+                    }}
+                    className="hud-panel rounded-xl p-4 space-y-3"
+                  >
+                    <h3 className="text-xs font-semibold uppercase tracking-[0.15em] text-amber-300">
+                      Configure Account Multi-Sign Quorum (`SignerListSet`)
+                    </h3>
+                    <div>
+                      <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">
+                        Required SignerQuorum (0 = Delete SignerList)
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={msQuorum}
+                        onChange={(e) => setMsQuorum(e.target.value)}
+                        className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs font-mono text-white"
+                      />
+                    </div>
+                    <div className="grid grid-cols-4 gap-2">
+                      <input
+                        type="text"
+                        value={msSigner1}
+                        onChange={(e) => setMsSigner1(e.target.value)}
+                        placeholder="Signer 1 r-Address"
+                        className="col-span-3 rounded-lg bg-slate-950 border border-slate-700 px-2.5 py-1.5 text-xs font-mono text-white"
+                      />
+                      <input
+                        type="number"
+                        min="1"
+                        value={msWeight1}
+                        onChange={(e) => setMsWeight1(e.target.value)}
+                        placeholder="Wt"
+                        className="rounded-lg bg-slate-950 border border-slate-700 px-2.5 py-1.5 text-xs font-mono text-white"
+                      />
+                    </div>
+                    <div className="grid grid-cols-4 gap-2">
+                      <input
+                        type="text"
+                        value={msSigner2}
+                        onChange={(e) => setMsSigner2(e.target.value)}
+                        placeholder="Signer 2 r-Address"
+                        className="col-span-3 rounded-lg bg-slate-950 border border-slate-700 px-2.5 py-1.5 text-xs font-mono text-white"
+                      />
+                      <input
+                        type="number"
+                        min="1"
+                        value={msWeight2}
+                        onChange={(e) => setMsWeight2(e.target.value)}
+                        placeholder="Wt"
+                        className="rounded-lg bg-slate-950 border border-slate-700 px-2.5 py-1.5 text-xs font-mono text-white"
+                      />
+                    </div>
+                    <button
+                      type="submit"
+                      className="w-full py-2 rounded-xl bg-amber-500/20 border border-amber-400/50 text-xs font-mono font-semibold text-amber-200"
+                    >
+                      Preview SignerListSet
+                    </button>
+                  </form>
+
+                  <div className="hud-panel rounded-xl p-4 space-y-3">
+                    <h3 className="text-xs font-semibold uppercase tracking-[0.15em] text-cyan-300">
+                      Multi-Sign Partial Signer &amp; Combiner (`xrpl.multisign`)
+                    </h3>
+                    {msStatusBanner && (
+                      <div
+                        className={`p-2 rounded text-xs font-mono border ${
+                          msStatusBanner.ok
+                            ? 'bg-emerald-500/15 border-emerald-400/40 text-emerald-200'
+                            : 'bg-rose-500/15 border-rose-400/40 text-rose-200'
+                        }`}
+                      >
+                        {msStatusBanner.text}
+                      </div>
+                    )}
+                    <div>
+                      <div className="text-[10px] font-mono uppercase text-slate-400 mb-1">
+                        Unsigned Multi-Sig tx_json (Fee = (1 + N) × BaseFee)
+                      </div>
+                      <textarea
+                        rows={4}
+                        value={msUnsignedJson}
+                        onChange={(e) => setMsUnsignedJson(e.target.value)}
+                        className="w-full rounded-lg bg-slate-950 border border-slate-700 p-2 font-mono text-[11px] text-white"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      disabled={!isCustodial || !vaultStatus.unlocked}
+                      onClick={() => void handlePartialMultisigSign()}
+                      className="w-full py-1.5 rounded-lg bg-cyan-500/20 border border-cyan-400/40 text-xs font-mono text-cyan-200 disabled:opacity-40"
+                    >
+                      Add Partial Signature With Selected Vault Wallet
+                    </button>
+                    <div>
+                      <div className="text-[10px] font-mono uppercase text-slate-400 mb-1">
+                        Collected Partial Signed Blobs (One Per Line)
+                      </div>
+                      <textarea
+                        rows={3}
+                        value={msPartialBlobsText}
+                        onChange={(e) => setMsPartialBlobsText(e.target.value)}
+                        placeholder="Paste partial multi-signed hex blobs here…"
+                        className="w-full rounded-lg bg-slate-950 border border-slate-700 p-2 font-mono text-[11px] text-emerald-200"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void handleCombineMultisig()}
+                      className="w-full py-2 rounded-xl bg-emerald-500/25 border border-emerald-400 text-xs font-mono font-semibold text-emerald-100"
+                    >
+                      Combine Signatures &amp; Broadcast to XRPL
+                    </button>
+                  </div>
+                </div>
+              )}
             </>
           )}
         </div>
       </div>
 
-      {/* Onboarding & Receive QR Modals */}
+      {/* Onboarding & QR Modals */}
       {modalMode && (
         <div
           className="fixed inset-0 z-40 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4"
@@ -1609,36 +1801,24 @@ export const WalletDeck: React.FC = () => {
             {modalMode === 'create' && (
               <form onSubmit={(e) => void handleCreateWallet(e)} className="space-y-3">
                 <h3 className="text-sm font-bold text-white">Create Encrypted XRPL Wallet</h3>
-                <div>
-                  <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">Label</label>
-                  <input
-                    autoFocus
-                    type="text"
-                    value={newLabel}
-                    onChange={(e) => setNewLabel(e.target.value)}
-                    placeholder="Primary Treasury / Dev Wallet"
-                    className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs text-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">
-                    Key Algorithm
-                  </label>
-                  <select
-                    value={newAlgo}
-                    onChange={(e) => setNewAlgo(e.target.value as WalletAlgorithm)}
-                    className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs font-mono text-white"
-                  >
-                    <option value="ed25519">ed25519 (Recommended XRPL Modern Default)</option>
-                    <option value="ecdsa-secp256k1">ecdsa-secp256k1</option>
-                  </select>
-                </div>
+                <input
+                  autoFocus
+                  type="text"
+                  value={newLabel}
+                  onChange={(e) => setNewLabel(e.target.value)}
+                  placeholder="Primary Treasury / Dev Wallet"
+                  className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs text-white"
+                />
+                <select
+                  value={newAlgo}
+                  onChange={(e) => setNewAlgo(e.target.value as WalletAlgorithm)}
+                  className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs font-mono text-white"
+                >
+                  <option value="ed25519">ed25519 (Recommended Modern Default)</option>
+                  <option value="ecdsa-secp256k1">ecdsa-secp256k1</option>
+                </select>
                 <div className="flex justify-end gap-2 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setModalMode(null)}
-                    className="px-3 py-1.5 text-xs text-slate-400"
-                  >
+                  <button type="button" onClick={() => setModalMode(null)} className="px-3 py-1.5 text-xs text-slate-400">
                     Cancel
                   </button>
                   <button
@@ -1669,15 +1849,8 @@ export const WalletDeck: React.FC = () => {
                   placeholder="sEd... or s..."
                   className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs font-mono text-white"
                 />
-                <p className="text-[11px] text-slate-400">
-                  Your seed is sent once over isolated IPC and encrypted directly into your local vault.
-                </p>
                 <div className="flex justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setModalMode(null)}
-                    className="px-3 py-1.5 text-xs text-slate-400"
-                  >
+                  <button type="button" onClick={() => setModalMode(null)} className="px-3 py-1.5 text-xs text-slate-400">
                     Cancel
                   </button>
                   <button
@@ -1692,12 +1865,12 @@ export const WalletDeck: React.FC = () => {
 
             {modalMode === 'watch' && (
               <form onSubmit={(e) => void handleAddWatch(e)} className="space-y-3">
-                <h3 className="text-sm font-bold text-white">Add Watch-Only XRPL Address</h3>
+                <h3 className="text-sm font-bold text-white">Add Watch-Only / Air-Gapped XRPL Address</h3>
                 <input
                   type="text"
                   value={newLabel}
                   onChange={(e) => setNewLabel(e.target.value)}
-                  placeholder="Cold Storage / Cold Vault"
+                  placeholder="Cold Storage / Xaman Wallet"
                   className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs text-white"
                 />
                 <input
@@ -1709,11 +1882,7 @@ export const WalletDeck: React.FC = () => {
                   className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs font-mono text-white"
                 />
                 <div className="flex justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setModalMode(null)}
-                    className="px-3 py-1.5 text-xs text-slate-400"
-                  >
+                  <button type="button" onClick={() => setModalMode(null)} className="px-3 py-1.5 text-xs text-slate-400">
                     Cancel
                   </button>
                   <button
@@ -1751,7 +1920,7 @@ export const WalletDeck: React.FC = () => {
         </div>
       )}
 
-      {/* Mandatory One-Time Secret Seed Backup Modal */}
+      {/* One-Time Seed Backup Modal */}
       {oneTimeBackup && (
         <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
           <div className="hud-panel rounded-2xl max-w-md w-full p-5 border border-emerald-400/50 space-y-4">
@@ -1759,8 +1928,7 @@ export const WalletDeck: React.FC = () => {
               One-Time Secret Seed Backup (Write Offline Now)
             </h3>
             <p className="text-xs text-slate-300 leading-relaxed">
-              For security, XRPL Command Center **never** exposes your secret seed again after closing this
-              window. Write it down offline in a safe place now:
+              XRPL Command Center never exposes your secret seed again after closing this window.
             </p>
             <div className="rounded-xl bg-slate-950 border border-slate-800 p-3 font-mono text-xs space-y-1.5">
               <div className="text-[10px] uppercase text-slate-500">Public Address</div>

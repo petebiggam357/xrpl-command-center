@@ -1,10 +1,12 @@
 import React, { useEffect } from 'react';
+import { AnalyticsDeck } from './components/AnalyticsDeck';
 import { CommandPalette } from './components/CommandPalette';
 import { ConsensusCoreCanvas } from './components/ConsensusCoreCanvas';
 import { InspectorDrawer } from './components/InspectorDrawer';
 import { LedgerRibbon } from './components/LedgerRibbon';
 import { LiveTxFeed } from './components/LiveTxFeed';
 import { NodeOpsDeck } from './components/NodeOpsDeck';
+import { PrimitivesDeck } from './components/PrimitivesDeck';
 import { SidebarNav } from './components/SidebarNav';
 import { TokenExplorer } from './components/TokenExplorer';
 import { TopHudBar } from './components/TopHudBar';
@@ -20,7 +22,6 @@ export const App: React.FC = () => {
   const activeTab = useCommandStore((s) => s.activeTab);
   const nodeAutoPoll = useCommandStore((s) => s.nodeAutoPoll);
 
-  // Wire live XRPL stream listeners & initial metadata fetch
   useEffect(() => {
     const bridge = getXrplBridge();
     const store = useCommandStore.getState();
@@ -49,7 +50,6 @@ export const App: React.FC = () => {
     };
   }, []);
 
-  // Optional 5-second auto-polling for user's own rippled / Clio node
   useEffect(() => {
     if (!nodeAutoPoll) return;
     void useCommandStore.getState().pollOwnNode();
@@ -59,7 +59,6 @@ export const App: React.FC = () => {
     return () => clearInterval(timer);
   }, [nodeAutoPoll]);
 
-  // Global keyboard shortcuts (Ctrl+K / Cmd+K and Escape)
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
@@ -104,7 +103,9 @@ export const App: React.FC = () => {
           {activeTab === 'validators' && <ValidatorDeck />}
           {activeTab === 'tokens' && <TokenExplorer />}
           {activeTab === 'wallets' && <WalletDeck />}
+          {activeTab === 'primitives' && <PrimitivesDeck />}
           {activeTab === 'nodeops' && <NodeOpsDeck />}
+          {activeTab === 'analytics' && <AnalyticsDeck />}
         </main>
       </div>
 

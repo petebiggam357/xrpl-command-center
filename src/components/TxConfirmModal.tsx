@@ -7,6 +7,7 @@ import {
   ExternalLink,
   KeyRound,
   Loader2,
+  QrCode,
   ShieldCheck,
   X,
 } from 'lucide-react';
@@ -20,18 +21,24 @@ export const TxConfirmModal: React.FC = () => {
   const txSubmitting = useCommandStore((s) => s.txSubmitting);
   const lastTxResult = useCommandStore((s) => s.lastTxResult);
   const vaultStatus = useCommandStore((s) => s.vaultStatus);
+  const pendingTxWalletId = useCommandStore((s) => s.pendingTxWalletId);
   const confirmAndSignPendingTx = useCommandStore((s) => s.confirmAndSignPendingTx);
   const closeTxConfirmModal = useCommandStore((s) => s.closeTxConfirmModal);
   const refreshVaultStatus = useCommandStore((s) => s.refreshVaultStatus);
   const inspectQuery = useCommandStore((s) => s.inspectQuery);
 
   const [showRawJson, setShowRawJson] = useState(false);
+  const [airgapMode, setAirgapMode] = useState(false);
+  const [signedBlobInput, setSignedBlobInput] = useState('');
+  const [blobError, setBlobError] = useState<string | null>(null);
   const [unlockPassphrase, setUnlockPassphrase] = useState('');
   const [unlockError, setUnlockError] = useState<string | null>(null);
 
   if (!pendingTxIntent) return null;
 
   const isMainnet = pendingTxPreview?.networkId === 'mainnet';
+  const signingAcct = vaultStatus.accounts.find((a) => a.id === pendingTxWalletId);
+  const isCustodial = signingAcct?.kind === 'custodial';
 
   const handleInlineUnlock = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -45,10 +52,21 @@ export const TxConfirmModal: React.FC = () => {
     }
   };
 
+  const handleSubmitExternalBlob = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBlobError(null);
+    const res = await getXrplBridge().walletSubmitSignedBlob(signedBlobInput);
+    if (!res.ok) {
+      setBlobError(res.error ?? 'Broadcast failed');
+    } else {
+      useCommandStore.setState({ lastTxResult: res });
+      setSignedBlobInput('');
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
       <div className="hud-panel rounded-2xl max-w-lg w-full border border-cyan-400/40 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
-        {/* Header */}
         <div
           className={`px-5 py-3.5 border-b flex items-center justify-between ${
             isMainnet
@@ -63,9 +81,7 @@ export const TxConfirmModal: React.FC = () => {
               <ShieldCheck className="w-5 h-5 text-emerald-400 shrink-0" />
             )}
             <div>
-              <h3 className="text-sm font-bold text-white">
-                Review &amp; Sign XRPL Transaction
-              </h3>
+              <h3 className="text-sm font-bold text-white">Review &amp; Sign XRPL Transaction</h3>
               <div className="text-[11px] font-mono">
                 <span className={isMainnet ? 'text-rose-300 font-semibold' : 'text-emerald-300'}>
                   {(pendingTxPreview?.networkId ?? 'NETWORK').toUpperCase()}
@@ -78,6 +94,18 @@ export const TxConfirmModal: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setAirgapMode((v) => !v)}
+              className={`p-1.5 rounded-lg border ${
+                airgapMode
+                  ? 'bg-cyan-500/20 border-cyan-400 text-cyan-200'
+                  : 'bg-slate-900 border-slate-700 text-slate-400 hover:text-white'
+              }`}
+              title="Air-Gapped QR & Signed tx_blob Broadcast"
+            >
+              <QrCode className="w-4 h-4" />
+            </button>
             <button
               type="button"
               onClick={() => setShowRawJson((v) => !v)}
@@ -96,7 +124,6 @@ export const TxConfirmModal: React.FC = () => {
           </div>
         </div>
 
-        {/* Body */}
         <div className="p-5 overflow-y-auto space-y-4">
           {pendingTxLoading ? (
             <div className="py-12 flex flex-col items-center justify-center gap-2 font-mono text-xs text-cyan-300">
@@ -171,7 +198,6 @@ export const TxConfirmModal: React.FC = () => {
             </div>
           ) : pendingTxPreview ? (
             <>
-              {/* Blocking Safety Error */}
               {pendingTxPreview.blockingError && (
                 <div className="p-3.5 rounded-xl bg-rose-950/50 border border-rose-500/50 flex items-start gap-2.5 text-xs text-rose-200">
                   <AlertOctagon className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
@@ -184,7 +210,6 @@ export const TxConfirmModal: React.FC = () => {
                 </div>
               )}
 
-              {/* Warnings */}
               {pendingTxPreview.warnings.map((w, idx) => (
                 <div
                   key={idx}
@@ -195,7 +220,6 @@ export const TxConfirmModal: React.FC = () => {
                 </div>
               ))}
 
-              {/* Summary Table */}
               <div className="rounded-xl bg-slate-950/85 border border-slate-800 divide-y divide-slate-800/80 font-mono text-xs">
                 {pendingTxPreview.summaryLines.map((line, i) => (
                   <div key={i} className="flex items-center justify-between gap-3 px-3.5 py-2">
@@ -211,20 +235,50 @@ export const TxConfirmModal: React.FC = () => {
                 </div>
               </div>
 
-              {/* Raw tx_json preview */}
+              {/* Air-Gapped QR & Signed Blob Broadcaster */}
+              {(airgapMode || !isCustodial) && !pendingTxPreview.blockingError && (
+                <div className="rounded-xl bg-slate-950 border border-cyan-400/35 p-3.5 space-y-3">
+                  <div className="text-xs font-mono font-semibold text-cyan-300">
+                    Air-Gapped QR Payload &amp; Signed `tx_blob` Broadcast
+                  </div>
+                  {pendingTxPreview.unsignedQrSvg && (
+                    <div
+                      className="w-40 h-40 mx-auto rounded-xl overflow-hidden border border-cyan-400/30 p-2 bg-[#061022]"
+                      dangerouslySetInnerHTML={{ __html: pendingTxPreview.unsignedQrSvg }}
+                    />
+                  )}
+                  <form onSubmit={(e) => void handleSubmitExternalBlob(e)} className="space-y-2">
+                    <input
+                      required
+                      type="text"
+                      value={signedBlobInput}
+                      onChange={(e) => setSignedBlobInput(e.target.value)}
+                      placeholder="Paste externally signed hex tx_blob or signed JSON…"
+                      className="w-full rounded-lg bg-slate-900 border border-slate-700 px-3 py-1.5 text-xs font-mono text-white"
+                    />
+                    {blobError && <div className="text-[11px] font-mono text-rose-400">{blobError}</div>}
+                    <button
+                      type="submit"
+                      className="w-full py-1.5 rounded-lg bg-cyan-500/20 border border-cyan-400/50 text-xs font-mono text-cyan-200"
+                    >
+                      Broadcast Externally Signed Blob
+                    </button>
+                  </form>
+                </div>
+              )}
+
               {showRawJson && (
                 <div>
                   <div className="text-[10px] font-mono uppercase text-slate-400 mb-1">
                     Unsigned Canonical tx_json
                   </div>
-                  <pre className="rounded-xl bg-slate-950 border border-slate-800 p-3 text-[11px] font-mono text-cyan-200 overflow-x-auto max-h-48">
+                  <pre className="rounded-xl bg-slate-950 border border-slate-800 p-3 text-[11px] font-mono text-cyan-200 overflow-x-auto max-h-44">
                     {JSON.stringify(pendingTxPreview.txJson, null, 2)}
                   </pre>
                 </div>
               )}
 
-              {/* Inline Vault Unlock if currently locked */}
-              {!vaultStatus.unlocked && !pendingTxPreview.blockingError && (
+              {isCustodial && !vaultStatus.unlocked && !pendingTxPreview.blockingError && (
                 <form
                   onSubmit={(e) => void handleInlineUnlock(e)}
                   className="p-3.5 rounded-xl bg-slate-950 border border-amber-400/40 space-y-2"
@@ -239,11 +293,11 @@ export const TxConfirmModal: React.FC = () => {
                       value={unlockPassphrase}
                       onChange={(e) => setUnlockPassphrase(e.target.value)}
                       placeholder="Master vault passphrase"
-                      className="flex-1 rounded-lg bg-slate-900 border border-slate-700 px-3 py-1.5 text-xs font-mono text-white focus:outline-none focus:border-cyan-400"
+                      className="flex-1 rounded-lg bg-slate-900 border border-slate-700 px-3 py-1.5 text-xs font-mono text-white"
                     />
                     <button
                       type="submit"
-                      className="px-3 py-1.5 rounded-lg bg-amber-500/20 border border-amber-400/50 text-xs font-mono text-amber-200 hover:bg-amber-500/30"
+                      className="px-3 py-1.5 rounded-lg bg-amber-500/20 border border-amber-400/50 text-xs font-mono text-amber-200"
                     >
                       Unlock
                     </button>
@@ -252,7 +306,6 @@ export const TxConfirmModal: React.FC = () => {
                 </form>
               )}
 
-              {/* Action Footer */}
               <div className="flex justify-end gap-2 pt-2">
                 <button
                   type="button"
@@ -262,28 +315,30 @@ export const TxConfirmModal: React.FC = () => {
                 >
                   Cancel
                 </button>
-                <button
-                  type="button"
-                  disabled={
-                    txSubmitting ||
-                    !pendingTxPreview.ok ||
-                    Boolean(pendingTxPreview.blockingError) ||
-                    !vaultStatus.unlocked
-                  }
-                  onClick={() => void confirmAndSignPendingTx()}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-mono font-bold border transition-colors disabled:opacity-40 ${
-                    isMainnet
-                      ? 'bg-rose-500/25 border-rose-400 text-rose-100 hover:bg-rose-500/40'
-                      : 'bg-emerald-500/25 border-emerald-400 text-emerald-100 hover:bg-emerald-500/40'
-                  }`}
-                >
-                  {txSubmitting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                  {txSubmitting
-                    ? 'Signing & Broadcasting…'
-                    : isMainnet
-                      ? 'Sign & Broadcast on MAINNET'
-                      : 'Sign & Broadcast'}
-                </button>
+                {isCustodial && (
+                  <button
+                    type="button"
+                    disabled={
+                      txSubmitting ||
+                      !pendingTxPreview.ok ||
+                      Boolean(pendingTxPreview.blockingError) ||
+                      !vaultStatus.unlocked
+                    }
+                    onClick={() => void confirmAndSignPendingTx()}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-mono font-bold border transition-colors disabled:opacity-40 ${
+                      isMainnet
+                        ? 'bg-rose-500/25 border-rose-400 text-rose-100 hover:bg-rose-500/40'
+                        : 'bg-emerald-500/25 border-emerald-400 text-emerald-100 hover:bg-emerald-500/40'
+                    }`}
+                  >
+                    {txSubmitting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                    {txSubmitting
+                      ? 'Signing & Broadcasting…'
+                      : isMainnet
+                        ? 'Sign & Broadcast on MAINNET'
+                        : 'Sign & Broadcast'}
+                  </button>
+                )}
               </div>
             </>
           ) : null}

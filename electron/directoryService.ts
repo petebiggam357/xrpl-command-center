@@ -1,7 +1,9 @@
 import type {
+  DidResolutionReport,
   InspectorResult,
   LiveTransaction,
   NetworkId,
+  OracleAggregateReport,
   OrderbookLevel,
   TokenOnLedgerReport,
   TokenRecord,
@@ -10,10 +12,12 @@ import type {
 } from '../src/shared/types';
 import {
   decodeCurrencyCode,
+  decodeHexAscii,
   decodeIssuerRiskFlags,
   detectQueryKind,
   dropsToXrpNumber,
   dropsToXrpString,
+  encodeCurrencyCode,
   formatCompactNumber,
   parseLiveTransactionEvent,
   rippleTimeToUnixMs,
@@ -129,7 +133,7 @@ async function fetchJsonWithTimeout<T>(url: string, timeoutMs = 10_000): Promise
       signal: controller.signal,
       headers: {
         Accept: 'application/json',
-        'User-Agent': 'XRPL-Command-Center/0.0.1-alpha',
+        'User-Agent': 'XRPL-Command-Center/0.0.2-alpha',
       },
     });
     if (!res.ok) {
@@ -212,7 +216,6 @@ export class DirectoryService {
       }
     }
 
-    // Sort UNL first, then 24h agreement score
     validators.sort((a, b) => {
       if (a.unl !== b.unl) return a.unl ? -1 : 1;
       return (b.agreement24h ?? -1) - (a.agreement24h ?? -1);
@@ -289,7 +292,7 @@ export class DirectoryService {
         return { tokens: list, fetchedAt: now, source: 's1.xrplmeta.org' };
       }
     } catch {
-      // fall through to curated fallback
+      // fall through
     }
 
     return {
@@ -313,12 +316,12 @@ export class DirectoryService {
       stream.request('book_offers', {
         taker_gets: { currency: currencyRaw, issuer },
         taker_pays: { currency: 'XRP' },
-        limit: 12,
+        limit: 18,
       }),
       stream.request('book_offers', {
         taker_gets: { currency: 'XRP' },
         taker_pays: { currency: currencyRaw, issuer },
-        limit: 12,
+        limit: 18,
       }),
       stream.request('amm_info', {
         asset: { currency: 'XRP' },
@@ -405,16 +408,24 @@ export class DirectoryService {
         const amt1 = ammObj.amount;
         const amt2 = ammObj.amount2 as { value?: string; currency?: string } | undefined;
         const lp = ammObj.lp_token as { value?: string } | undefined;
+        const asset1Numeric =
+          typeof amt1 === 'string'
+            ? dropsToXrpNumber(amt1)
+            : Number((amt1 as { value?: string })?.value ?? 0);
+        const asset2Numeric = Number(amt2?.value ?? 0);
+
         amm = {
           account: String(ammObj.account ?? ''),
           asset1Amount:
             typeof amt1 === 'string'
               ? `${dropsToXrpString(amt1, 2)} XRP`
-              : `${formatCompactNumber(Number((amt1 as { value?: string })?.value ?? 0))}`,
+              : `${formatCompactNumber(asset1Numeric)}`,
           asset2Amount: amt2?.value
-            ? `${formatCompactNumber(Number(amt2.value))} ${decodeCurrencyCode(amt2.currency ?? currencyRaw)}`
+            ? `${formatCompactNumber(asset2Numeric)} ${decodeCurrencyCode(amt2.currency ?? currencyRaw)}`
             : '—',
-          tradingFeeBps: Number(ammObj.trading_fee ?? 0) / 100,
+          asset1Numeric,
+          asset2Numeric,
+          tradingFeeBps: Number(ammObj.trading_fee ?? 0) / 10, // XRPL trading_fee 1..1000 => 0.1..100 bps
           lpTokenSupply: lp?.value ? formatCompactNumber(Number(lp.value)) : '—',
         };
       }
@@ -433,6 +444,78 @@ export class DirectoryService {
       amm,
       error,
     };
+  }
+
+  public async queryOracleAggregate(
+    stream: XrplStreamManager,
+    params: {
+      baseAsset: string;
+      quoteAsset: string;
+      oracles: Array<{ account: string; oracleDocumentId: number }>;
+    }
+  ): Promise<OracleAggregateReport> {
+    const baseAsset = encodeCurrencyCode(params.baseAsset);
+    const quoteAsset = encodeCurrencyCode(params.quoteAsset);
+    try {
+      const res = await stream.request('get_aggregate_price', {
+        base_asset: baseAsset,
+        quote_asset: quoteAsset,
+        trim: 20,
+        oracles: params.oracles.map((o) => ({
+          account: o.account.trim(),
+          oracle_document_id: Number(o.oracleDocumentId),
+        })),
+      });
+      const result = (res.result ?? {}) as Record<string, unknown>;
+      const entire = result.entire_set as Record<string, unknown> | undefined;
+      const trimmed = result.trimmed_set as Record<string, unknown> | undefined;
+      return {
+        ok: true,
+        baseAsset: params.baseAsset,
+        quoteAsset: params.quoteAsset,
+        entireSetMean: entire?.mean !== undefined ? String(entire.mean) : undefined,
+        trimmedMean: trimmed?.mean !== undefined ? String(trimmed.mean) : undefined,
+        median: result.median !== undefined ? String(result.median) : undefined,
+        size: typeof entire?.size === 'number' ? entire.size : undefined,
+        time: typeof result.time === 'number' ? rippleTimeToUnixMs(result.time) : undefined,
+      };
+    } catch (err) {
+      return {
+        ok: false,
+        baseAsset: params.baseAsset,
+        quoteAsset: params.quoteAsset,
+        error: err instanceof Error ? err.message : 'get_aggregate_price query failed',
+      };
+    }
+  }
+
+  public async resolveDid(stream: XrplStreamManager, address: string): Promise<DidResolutionReport> {
+    const clean = address.trim();
+    const network = stream.getStatus().networkId === 'testnet' ? 'testnet' : '1';
+    const did = `did:xrpl:${network}:${clean}`;
+
+    try {
+      const res = await stream.request('ledger_entry', {
+        did: clean,
+        ledger_index: 'validated',
+      });
+      const node = ((res.result as Record<string, unknown>)?.node ?? {}) as Record<string, unknown>;
+      return {
+        ok: true,
+        did,
+        address: clean,
+        uri: decodeHexAscii(typeof node.URI === 'string' ? node.URI : undefined),
+        didDocument: decodeHexAscii(typeof node.DIDDocument === 'string' ? node.DIDDocument : undefined),
+        data: decodeHexAscii(typeof node.Data === 'string' ? node.Data : undefined),
+      };
+    } catch (err) {
+      return {
+        ok: false,
+        did,
+        address: clean,
+        error: err instanceof Error ? err.message : 'No DID ledger object found for this account',
+      };
+    }
   }
 
   public async inspectQuery(stream: XrplStreamManager, rawQuery: string): Promise<InspectorResult> {

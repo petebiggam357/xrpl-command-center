@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
+  Box,
   Check,
   Copy,
+  FileDiff,
   FileText,
   GitBranch,
   Lock,
@@ -10,16 +12,24 @@ import {
   Power,
   Radio,
   RefreshCw,
+  Save,
   Server,
   Shield,
   Terminal,
   Unlock,
 } from 'lucide-react';
 import { getXrplBridge } from '../services/xrplBridge';
+import {
+  computeUnifiedLineDiff,
+  generateRippledConfigBundle,
+  type HardwareSizingPreset,
+  type LedgerDbBackend,
+} from '../shared/studioUtils';
+import type { DockerNodeStatus } from '../shared/types';
 import { shortenAddress } from '../shared/xrplCodec';
 import { useCommandStore } from '../store/useCommandStore';
 
-type NodeSubTab = 'overview' | 'peers' | 'amendments' | 'admin' | 'logs';
+type NodeSubTab = 'overview' | 'docker' | 'config-studio' | 'peers' | 'amendments' | 'admin' | 'logs';
 
 function formatUptime(sec?: number): string {
   if (!sec || !Number.isFinite(sec)) return '—';
@@ -49,6 +59,23 @@ export const NodeOpsDeck: React.FC = () => {
   const [copiedSsh, setCopiedSsh] = useState(false);
   const [logFilter, setLogFilter] = useState<'ALL' | 'WRN' | 'ERR'>('ALL');
 
+  // Track 1: Docker Manager State
+  const [dockerStatus, setDockerStatus] = useState<DockerNodeStatus | null>(null);
+  const [dockerBusy, setDockerBusy] = useState(false);
+  const [dockerBanner, setDockerBanner] = useState<{ ok: boolean; text: string } | null>(null);
+  const [dockerNet, setDockerNet] = useState<'mainnet' | 'testnet' | 'devnet'>('testnet');
+  const [dockerSizing, setDockerSizing] = useState<HardwareSizingPreset>('32gb-standard');
+  const [dockerDb, setDockerDb] = useState<LedgerDbBackend>('NuDB');
+  const [dockerRetention, setDockerRetention] = useState('2000');
+  const [dockerLogs, setDockerLogs] = useState<string[]>([]);
+
+  // Track 1: Visual rippled.cfg & validators.txt Diff Studio State
+  const [cfgDir, setCfgDir] = useState('');
+  const [baselineCfg, setBaselineCfg] = useState('');
+  const [draftCfg, setDraftCfg] = useState('');
+  const [draftValidators, setDraftValidators] = useState('');
+  const [cfgBanner, setCfgBanner] = useState<{ ok: boolean; text: string } | null>(null);
+
   // Admin action form state
   const [peerIp, setPeerIp] = useState('');
   const [peerPort, setPeerPort] = useState('51235');
@@ -66,10 +93,105 @@ export const NodeOpsDeck: React.FC = () => {
 
   const sshSnippet = 'ssh -N -L 5005:127.0.0.1:5005 -L 6006:127.0.0.1:6006 user@your-xrpl-node';
 
+  const refreshDocker = async () => {
+    const st = await getXrplBridge().dockerGetStatus();
+    setDockerStatus(st);
+    if (st.containerExists) {
+      const lg = await getXrplBridge().dockerReadLogs(80);
+      if (lg.ok) setDockerLogs(lg.lines);
+    }
+  };
+
+  const loadConfigStudio = async (dirOverride?: string) => {
+    const bundle = await getXrplBridge().nodeConfigLoad(dirOverride);
+    setCfgDir(bundle.configDir);
+    setBaselineCfg(bundle.rippledCfg);
+    setDraftCfg(bundle.rippledCfg);
+    setDraftValidators(bundle.validatorsTxt);
+  };
+
+  useEffect(() => {
+    if (subTab === 'docker') void refreshDocker();
+    if (subTab === 'config-studio' && !draftCfg) void loadConfigStudio();
+  }, [subTab]);
+
+  const diffLines = useMemo(
+    () => computeUnifiedLineDiff(baselineCfg, draftCfg),
+    [baselineCfg, draftCfg]
+  );
+  const changedDiffCount = useMemo(
+    () => diffLines.filter((d) => d.type !== 'same').length,
+    [diffLines]
+  );
+
   const handleCopySsh = () => {
     void navigator.clipboard.writeText(sshSnippet);
     setCopiedSsh(true);
     setTimeout(() => setCopiedSsh(false), 1800);
+  };
+
+  const handleProvisionDocker = async () => {
+    setDockerBusy(true);
+    setDockerBanner(null);
+    const res = await getXrplBridge().dockerProvisionNode({
+      network: dockerNet,
+      sizing: dockerSizing,
+      dbBackend: dockerDb,
+      onlineDeleteLedgers: Number(dockerRetention) || 2000,
+    });
+    setDockerBusy(false);
+    if (res.status) setDockerStatus(res.status);
+    setDockerBanner({
+      ok: res.ok,
+      text: res.ok ? res.message ?? 'Container provisioned!' : res.error ?? 'Provision failed',
+    });
+    if (res.ok) {
+      void refreshDocker();
+      setTimeout(() => void pollOwnNode(), 2500);
+    }
+  };
+
+  const handleDockerAction = async (action: 'start' | 'stop' | 'restart' | 'remove') => {
+    setDockerBusy(true);
+    const res = await getXrplBridge().dockerLifecycleAction(action);
+    setDockerBusy(false);
+    if (res.status) setDockerStatus(res.status);
+    setDockerBanner({
+      ok: res.ok,
+      text: res.ok ? res.message ?? `Container ${action} complete` : res.error ?? 'Action failed',
+    });
+    void refreshDocker();
+  };
+
+  const handleApplyPresetToEditor = () => {
+    const generated = generateRippledConfigBundle({
+      network: dockerNet,
+      sizing: dockerSizing,
+      dbBackend: dockerDb,
+      dataDir: '/var/lib/rippled',
+      onlineDeleteLedgers: Number(dockerRetention) || 2000,
+      maxPeers: dockerSizing === '64gb-full' ? 80 : 50,
+      enablePublicWs: false,
+    });
+    setDraftCfg(generated.rippledCfg);
+    setDraftValidators(generated.validatorsTxt);
+  };
+
+  const handleSaveConfigWithBackup = async () => {
+    const res = await getXrplBridge().nodeConfigSaveWithBackup({
+      configDir: cfgDir,
+      rippledCfg: draftCfg,
+      validatorsTxt: draftValidators,
+    });
+    if (res.ok) {
+      setBaselineCfg(draftCfg);
+      setCfgBanner({
+        ok: true,
+        text: `Saved rippled.cfg & validators.txt (${res.backupPaths?.length ?? 0} timestamped .bak backup(s) created).`,
+      });
+    } else {
+      setCfgBanner({ ok: false, text: res.error ?? 'Failed to save config' });
+    }
   };
 
   const runConfirmedAdminAction = async () => {
@@ -114,10 +236,10 @@ export const NodeOpsDeck: React.FC = () => {
             <Server className="w-4 h-4 text-cyan-400" />
             <div>
               <h2 className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan-300">
-                Self-Hosted rippled / Clio Node Operations Console
+                Self-Hosted rippled / Clio Node Operations &amp; Docker Launcher
               </h2>
               <p className="text-[11px] text-slate-400">
-                Loopback &amp; SSH-tunneled admin telemetry, peer management, amendments, and local log tailing
+                1-click local Docker `xrpld` orchestration, `rippled.cfg` diff studio, admin telemetry &amp; log tailing
               </p>
             </div>
           </div>
@@ -207,7 +329,6 @@ export const NodeOpsDeck: React.FC = () => {
           </div>
         )}
 
-        {/* SSH Tunnel Quick Helper */}
         <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 rounded-lg bg-slate-950/80 border border-slate-800 text-[11px] font-mono">
           <div className="flex items-center gap-2 text-slate-400 overflow-x-auto">
             <Terminal className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
@@ -225,31 +346,45 @@ export const NodeOpsDeck: React.FC = () => {
         </div>
       </div>
 
-      {/* Status Banner when disconnected / not yet polled */}
-      {(!nodeSnapshot || !nodeSnapshot.connected) && (
-        <div className="hud-panel rounded-xl p-5 border-dashed border-slate-700 flex flex-wrap items-center justify-between gap-4">
-          <div className="space-y-1">
-            <div className="text-sm font-semibold text-white">
-              {nodeSnapshot?.error ? 'Unable to Reach Local / Tunneled Node' : 'Ready to Connect Your rippled / Clio Node'}
-            </div>
-            <p className="text-xs text-slate-400 max-w-2xl">
-              {nodeSnapshot?.error
-                ? `${nodeSnapshot.error} — Verify rippled is running on ${nodeConfig.rpcUrl} (or your SSH tunnel is open), then click Poll Node.`
-                : 'Point the Admin RPC URL above to your local rippled instance (default http://127.0.0.1:5005) or SSH-tunneled server and click Poll Node to inspect sync health, peers, amendments, and logs.'}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => void pollOwnNode()}
-            className="px-4 py-2 rounded-xl bg-cyan-500/20 border border-cyan-400/50 text-xs font-mono text-cyan-200 hover:bg-cyan-500/30"
-          >
-            Connect &amp; Poll Now
-          </button>
-        </div>
-      )}
+      {/* Sub-tabs Navigation */}
+      <div className="flex flex-wrap items-center gap-2">
+        {[
+          { id: 'overview', label: 'Node Telemetry', icon: Server },
+          { id: 'docker', label: '1-Click Docker Node', icon: Box },
+          { id: 'config-studio', label: 'rippled.cfg Diff Studio', icon: FileDiff },
+          { id: 'peers', label: `Peers (${nodeSnapshot?.peers.length ?? 0})`, icon: Network },
+          {
+            id: 'amendments',
+            label: `Amendments (${pendingAmendments.length} pending)`,
+            icon: GitBranch,
+          },
+          { id: 'admin', label: 'Admin Controls', icon: Shield },
+          { id: 'logs', label: 'Local Log Tailer', icon: FileText },
+        ].map((tab) => {
+          const Icon = tab.icon;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => {
+                setSubTab(tab.id as NodeSubTab);
+                if (tab.id === 'logs') void refreshNodeLogs();
+              }}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono border transition-colors ${
+                subTab === tab.id
+                  ? 'bg-cyan-500/20 border-cyan-400/50 text-cyan-200'
+                  : 'bg-panel border-slate-800 text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Icon className="w-3.5 h-3.5" />
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
 
       {/* Telemetry KPI Grid when connected */}
-      {nodeSnapshot?.connected && (
+      {nodeSnapshot?.connected && subTab === 'overview' && (
         <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
           <div className="hud-panel rounded-xl p-3">
             <div className="text-[10px] font-mono uppercase text-slate-400">Server State</div>
@@ -323,42 +458,7 @@ export const NodeOpsDeck: React.FC = () => {
         </div>
       )}
 
-      {/* Sub-tabs Navigation */}
-      <div className="flex flex-wrap items-center gap-2">
-        {[
-          { id: 'overview', label: 'Node Telemetry', icon: Server },
-          { id: 'peers', label: `Peers (${nodeSnapshot?.peers.length ?? 0})`, icon: Network },
-          {
-            id: 'amendments',
-            label: `Amendments (${pendingAmendments.length} pending)`,
-            icon: GitBranch,
-          },
-          { id: 'admin', label: 'Admin Controls', icon: Shield },
-          { id: 'logs', label: 'Local Log Tailer', icon: FileText },
-        ].map((tab) => {
-          const Icon = tab.icon;
-          return (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => {
-                setSubTab(tab.id as NodeSubTab);
-                if (tab.id === 'logs') void refreshNodeLogs();
-              }}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono border transition-colors ${
-                subTab === tab.id
-                  ? 'bg-cyan-500/20 border-cyan-400/50 text-cyan-200'
-                  : 'bg-panel border-slate-800 text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <Icon className="w-3.5 h-3.5" />
-              {tab.label}
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Sub-tab Content */}
+      {/* SUB-TAB: OVERVIEW */}
       {subTab === 'overview' && (
         <div className="hud-panel rounded-xl p-4 grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-mono">
           <div className="space-y-2">
@@ -399,8 +499,293 @@ export const NodeOpsDeck: React.FC = () => {
                 </div>
               ))
             ) : (
-              <div className="text-slate-500 py-4">Poll a running rippled node to inspect state accounting.</div>
+              <div className="text-slate-500 py-4">
+                {nodeSnapshot?.error ?? 'Poll a running rippled node (or launch a local Docker node in the next tab) to inspect state accounting.'}
+              </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* SUB-TAB: 1-CLICK DOCKER NODE MANAGER */}
+      {subTab === 'docker' && (
+        <div className="space-y-4">
+          <div className="hud-panel rounded-xl p-4 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="text-xs font-semibold uppercase tracking-[0.15em] text-cyan-300">
+                  Cross-Platform Docker `xrpld` Node Orchestrator
+                </h3>
+                <p className="text-[11px] text-slate-400">
+                  Provisions `xrpllabsofficial/xrpld:latest` with Admin RPC (`127.0.0.1:5005`) and WS (`127.0.0.1:6006`) bound strictly to loopback.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => void refreshDocker()}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-xs font-mono text-slate-200"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                Probe Docker
+              </button>
+            </div>
+
+            {dockerBanner && (
+              <div
+                className={`p-3 rounded-xl font-mono text-xs border ${
+                  dockerBanner.ok
+                    ? 'bg-emerald-500/15 border-emerald-400/40 text-emerald-200'
+                    : 'bg-rose-500/15 border-rose-400/40 text-rose-200'
+                }`}
+              >
+                {dockerBanner.text}
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3 font-mono text-xs">
+              <div className="rounded-xl bg-slate-950 border border-slate-800 p-3">
+                <div className="text-[10px] uppercase text-slate-500">Docker Engine</div>
+                <div className={dockerStatus?.daemonRunning ? 'text-emerald-300 font-bold mt-1' : 'text-amber-300 font-bold mt-1'}>
+                  {dockerStatus?.daemonRunning
+                    ? `ONLINE (v${dockerStatus.dockerVersion ?? ''})`
+                    : 'OFFLINE / UNAVAILABLE'}
+                </div>
+              </div>
+
+              <div className="rounded-xl bg-slate-950 border border-slate-800 p-3">
+                <div className="text-[10px] uppercase text-slate-500">Managed Container</div>
+                <div className="text-white font-bold mt-1">
+                  {dockerStatus?.containerExists
+                    ? `${dockerStatus.containerState?.toUpperCase()}`
+                    : 'NOT CREATED'}
+                </div>
+              </div>
+
+              <div className="md:col-span-2 rounded-xl bg-slate-950 border border-slate-800 p-3">
+                <div className="text-[10px] uppercase text-slate-500">Managed Config Directory</div>
+                <div className="text-cyan-300 text-[11px] truncate mt-1">
+                  {dockerStatus?.configDir || '—'}
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3 pt-2">
+              <div>
+                <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">Network</label>
+                <select
+                  value={dockerNet}
+                  onChange={(e) => setDockerNet(e.target.value as typeof dockerNet)}
+                  className="w-full rounded-lg bg-slate-950 border border-slate-700 px-2.5 py-1.5 text-xs font-mono text-white"
+                >
+                  <option value="testnet">XRPL Testnet (Fastest Sync)</option>
+                  <option value="mainnet">XRPL Mainnet (dUNL)</option>
+                  <option value="devnet">XRPL Devnet</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">
+                  Hardware Sizing
+                </label>
+                <select
+                  value={dockerSizing}
+                  onChange={(e) => setDockerSizing(e.target.value as HardwareSizingPreset)}
+                  className="w-full rounded-lg bg-slate-950 border border-slate-700 px-2.5 py-1.5 text-xs font-mono text-white"
+                >
+                  <option value="16gb-light">16 GB RAM (Medium)</option>
+                  <option value="32gb-standard">32 GB RAM (Large)</option>
+                  <option value="64gb-full">64 GB+ RAM (Huge)</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">
+                  KV Store Backend
+                </label>
+                <select
+                  value={dockerDb}
+                  onChange={(e) => setDockerDb(e.target.value as LedgerDbBackend)}
+                  className="w-full rounded-lg bg-slate-950 border border-slate-700 px-2.5 py-1.5 text-xs font-mono text-white"
+                >
+                  <option value="NuDB">NuDB (SSD Recommended)</option>
+                  <option value="RocksDB">RocksDB</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">
+                  online_delete Ledgers
+                </label>
+                <input
+                  type="number"
+                  min="256"
+                  value={dockerRetention}
+                  onChange={(e) => setDockerRetention(e.target.value)}
+                  className="w-full rounded-lg bg-slate-950 border border-slate-700 px-2.5 py-1.5 text-xs font-mono text-white"
+                />
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-2 pt-1">
+              <button
+                type="button"
+                disabled={dockerBusy || !dockerStatus?.daemonRunning}
+                onClick={() => void handleProvisionDocker()}
+                className="px-4 py-2 rounded-xl bg-emerald-500/25 border border-emerald-400 text-xs font-mono font-semibold text-emerald-100 disabled:opacity-40"
+              >
+                {dockerBusy ? 'Working…' : 'Provision & Launch Local Docker Node'}
+              </button>
+
+              {dockerStatus?.containerExists && (
+                <>
+                  <button
+                    type="button"
+                    disabled={dockerBusy || dockerStatus.containerRunning}
+                    onClick={() => void handleDockerAction('start')}
+                    className="px-3 py-2 rounded-xl bg-cyan-500/20 border border-cyan-400/50 text-xs font-mono text-cyan-200 disabled:opacity-40"
+                  >
+                    Start
+                  </button>
+                  <button
+                    type="button"
+                    disabled={dockerBusy || !dockerStatus.containerRunning}
+                    onClick={() => void handleDockerAction('stop')}
+                    className="px-3 py-2 rounded-xl bg-amber-500/20 border border-amber-400/50 text-xs font-mono text-amber-200 disabled:opacity-40"
+                  >
+                    Stop
+                  </button>
+                  <button
+                    type="button"
+                    disabled={dockerBusy}
+                    onClick={() => void handleDockerAction('restart')}
+                    className="px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs font-mono text-slate-200 disabled:opacity-40"
+                  >
+                    Restart
+                  </button>
+                  <button
+                    type="button"
+                    disabled={dockerBusy}
+                    onClick={() => void handleDockerAction('remove')}
+                    className="px-3 py-2 rounded-xl bg-rose-500/20 border border-rose-400/50 text-xs font-mono text-rose-200 disabled:opacity-40"
+                  >
+                    Remove Container
+                  </button>
+                </>
+              )}
+            </div>
+
+            {dockerLogs.length > 0 && (
+              <div className="rounded-xl bg-slate-950 border border-slate-800 p-3 font-mono text-[11px] max-h-56 overflow-auto space-y-0.5 text-slate-300">
+                {dockerLogs.map((l, idx) => (
+                  <div key={idx}>{l}</div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* SUB-TAB: VISUAL RIPPLED.CFG & VALIDATORS.TXT DIFF STUDIO */}
+      {subTab === 'config-studio' && (
+        <div className="hud-panel rounded-xl p-4 space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="text-xs font-semibold uppercase tracking-[0.15em] text-cyan-300">
+                Visual `rippled.cfg` &amp; `validators.txt` Diff Studio
+              </h3>
+              <p className="text-[11px] text-slate-400">
+                Review exact line-by-line diffs before writing. Automatically creates timestamped `.bak` backups.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={handleApplyPresetToEditor}
+                className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs font-mono text-cyan-200"
+              >
+                Generate Preset ({dockerNet.toUpperCase()} / {dockerSizing})
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleSaveConfigWithBackup()}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-emerald-500/25 border border-emerald-400 text-xs font-mono font-semibold text-emerald-100"
+              >
+                <Save className="w-3.5 h-3.5" />
+                Save with Auto-Backup ({changedDiffCount} diff lines)
+              </button>
+            </div>
+          </div>
+
+          {cfgBanner && (
+            <div
+              className={`p-2.5 rounded-lg text-xs font-mono border ${
+                cfgBanner.ok
+                  ? 'bg-emerald-500/15 border-emerald-400/40 text-emerald-200'
+                  : 'bg-rose-500/15 border-rose-400/40 text-rose-200'
+              }`}
+            >
+              {cfgBanner.text}
+            </div>
+          )}
+
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={cfgDir}
+              onChange={(e) => setCfgDir(e.target.value)}
+              placeholder="Config directory path"
+              className="flex-1 rounded-lg bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs font-mono text-white"
+            />
+            <button
+              type="button"
+              onClick={() => void loadConfigStudio(cfgDir)}
+              className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs font-mono text-slate-200"
+            >
+              Load Dir
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+            <div>
+              <div className="text-[10px] font-mono uppercase text-slate-400 mb-1">rippled.cfg</div>
+              <textarea
+                rows={15}
+                value={draftCfg}
+                onChange={(e) => setDraftCfg(e.target.value)}
+                className="w-full rounded-xl bg-slate-950 border border-slate-800 p-3 font-mono text-[11px] text-slate-200 focus:outline-none focus:border-cyan-400"
+              />
+            </div>
+            <div>
+              <div className="text-[10px] font-mono uppercase text-slate-400 mb-1">validators.txt</div>
+              <textarea
+                rows={15}
+                value={draftValidators}
+                onChange={(e) => setDraftValidators(e.target.value)}
+                className="w-full rounded-xl bg-slate-950 border border-slate-800 p-3 font-mono text-[11px] text-slate-200 focus:outline-none focus:border-cyan-400"
+              />
+            </div>
+            <div>
+              <div className="text-[10px] font-mono uppercase text-cyan-300 mb-1">
+                Live Unified Diff Preview (`rippled.cfg`)
+              </div>
+              <div className="rounded-xl bg-slate-950 border border-slate-800 p-3 font-mono text-[11px] h-[318px] overflow-auto space-y-0.5">
+                {changedDiffCount === 0 ? (
+                  <div className="text-slate-500">No unsaved changes vs baseline.</div>
+                ) : (
+                  diffLines
+                    .filter((d) => d.type !== 'same')
+                    .map((d, idx) => (
+                      <div
+                        key={idx}
+                        className={
+                          d.type === 'added'
+                            ? 'bg-emerald-500/15 text-emerald-300 px-1.5 rounded'
+                            : 'bg-rose-500/15 text-rose-300 px-1.5 rounded'
+                        }
+                      >
+                        {d.type === 'added' ? '+' : '-'} {d.text}
+                      </div>
+                    ))
+                )}
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -537,7 +922,6 @@ export const NodeOpsDeck: React.FC = () => {
           </div>
 
           <div className={`grid grid-cols-1 md:grid-cols-2 gap-4 ${!adminUnlocked ? 'opacity-45 pointer-events-none' : ''}`}>
-            {/* Connect Peer */}
             <div className="p-3.5 rounded-xl bg-slate-950/75 border border-slate-800 space-y-2">
               <div className="text-xs font-mono font-semibold text-cyan-300">Connect Peer (`connect`)</div>
               <div className="flex gap-2">
@@ -573,7 +957,6 @@ export const NodeOpsDeck: React.FC = () => {
               </button>
             </div>
 
-            {/* Adjust Log Level */}
             <div className="p-3.5 rounded-xl bg-slate-950/75 border border-slate-800 space-y-2">
               <div className="text-xs font-mono font-semibold text-cyan-300">Runtime Log Level (`log_level`)</div>
               <select
@@ -604,7 +987,6 @@ export const NodeOpsDeck: React.FC = () => {
               </button>
             </div>
 
-            {/* Online Deletion */}
             <div className="p-3.5 rounded-xl bg-slate-950/75 border border-slate-800 space-y-2">
               <div className="text-xs font-mono font-semibold text-cyan-300">
                 Advisory Online Deletion (`can_delete`)
@@ -634,7 +1016,6 @@ export const NodeOpsDeck: React.FC = () => {
               </button>
             </div>
 
-            {/* Graceful Stop */}
             <div className="p-3.5 rounded-xl bg-rose-950/25 border border-rose-500/30 space-y-2">
               <div className="text-xs font-mono font-semibold text-rose-300 flex items-center gap-1.5">
                 <Power className="w-3.5 h-3.5" />
@@ -648,7 +1029,7 @@ export const NodeOpsDeck: React.FC = () => {
                 onClick={() =>
                   setPendingAction({
                     title: 'Gracefully Stop rippled Daemon?',
-                    description: `This will send the admin "stop" RPC command to ${nodeConfig.rpcUrl}. Your node will shut down gracefully and go offline until restarted.`,
+                    description: `This will send the admin "stop" RPC command to ${nodeConfig.rpcUrl}.`,
                     method: 'stop',
                     params: {},
                     danger: true,
@@ -736,7 +1117,6 @@ export const NodeOpsDeck: React.FC = () => {
         </div>
       )}
 
-      {/* Explicit Confirmation Modal for Admin RPC Commands */}
       {pendingAction && (
         <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="hud-panel rounded-2xl max-w-md w-full p-5 border border-amber-400/50 space-y-4">

@@ -2,11 +2,21 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import QRCode from 'qrcode';
-import { ECDSA, isValidClassicAddress, Wallet } from 'xrpl';
+import {
+  decode,
+  ECDSA,
+  encode,
+  encodeForSigning,
+  isValidClassicAddress,
+  multisign,
+  Wallet,
+} from 'xrpl';
 import type {
   AssetSpec,
   LiveTransaction,
   NetworkId,
+  PathFindQuote,
+  SignerListInfo,
   TxPreflightPreview,
   TxSubmitResult,
   VaultStatus,
@@ -28,6 +38,7 @@ import {
   dropsToXrpString,
   encodeCurrencyCode,
   formatXrplAmount,
+  isIssuedAmount,
   parseLiveTransactionEvent,
   rippleTimeToUnixMs,
   unixMsToRippleTime,
@@ -44,7 +55,7 @@ export interface OsCipherAdapter {
 
 interface EncryptedSeedPayload {
   verifier: 'XRPL_CC_VAULT_V1';
-  seeds: Record<string, string>; // walletId -> XRPL family seed
+  seeds: Record<string, string>;
 }
 
 interface VaultDiskFile {
@@ -59,8 +70,8 @@ interface VaultDiskFile {
 }
 
 const VAULT_FILENAME = 'wallet-vault.enc.json';
-const AUTO_LOCK_MS = 15 * 60 * 1000; // 15 minutes
-const MAX_SAFE_FEE_DROPS = 5_000; // 0.005 XRP cap guard
+const AUTO_LOCK_MS = 15 * 60 * 1000;
+const MAX_SAFE_FEE_DROPS = 5_000;
 
 export function formatAssetForXrpl(
   asset: AssetSpec
@@ -127,6 +138,16 @@ export function buildXrplTransactionFromIntent(intent: WalletTxIntent): {
         Destination: intent.destination.trim(),
         Amount: amount,
       };
+      if (intent.sendMax) {
+        tx.SendMax = formatAssetForXrpl(intent.sendMax);
+      }
+      if (intent.deliverMin) {
+        tx.DeliverMin = formatAssetForXrpl(intent.deliverMin);
+        tx.Flags = 0x00020000; // tfPartialPayment paired with DeliverMin for slippage protection
+      }
+      if (intent.paths && intent.paths.length > 0) {
+        tx.Paths = intent.paths;
+      }
       if (intent.destinationTag !== undefined && Number.isInteger(intent.destinationTag) && intent.destinationTag >= 0) {
         tx.DestinationTag = intent.destinationTag;
       }
@@ -136,16 +157,18 @@ export function buildXrplTransactionFromIntent(intent: WalletTxIntent): {
       return {
         tx,
         summaryLines: [
-          { label: 'Action', value: 'Payment' },
+          { label: 'Action', value: intent.deliverMin ? 'Smart Pathfinding Swap (Payment)' : 'Payment' },
           { label: 'From', value: intent.account },
           { label: 'Destination', value: intent.destination.trim() },
           {
-            label: 'Amount',
+            label: 'Target Amount',
             value:
               typeof amount === 'string'
                 ? `${dropsToXrpString(amount, 6)} XRP`
                 : `${amount.value} ${decodeCurrencyCode(amount.currency)}`,
           },
+          ...(tx.SendMax ? [{ label: 'Max Spend (SendMax)', value: formatXrplAmount(tx.SendMax) }] : []),
+          ...(tx.DeliverMin ? [{ label: 'Min Received (DeliverMin)', value: formatXrplAmount(tx.DeliverMin) }] : []),
           ...(tx.DestinationTag !== undefined
             ? [{ label: 'Destination Tag', value: String(tx.DestinationTag) }]
             : []),
@@ -158,7 +181,7 @@ export function buildXrplTransactionFromIntent(intent: WalletTxIntent): {
         throw new Error('Invalid token issuer r-address');
       }
       const currency = encodeCurrencyCode(intent.currency);
-      const flags = intent.allowRippling ? 0x00040000 : 0x00020000; // tfClearNoRipple vs tfSetNoRipple
+      const flags = intent.allowRippling ? 0x00040000 : 0x00020000;
       const tx: Record<string, unknown> = {
         TransactionType: 'TrustSet',
         Account: intent.account,
@@ -220,6 +243,49 @@ export function buildXrplTransactionFromIntent(intent: WalletTxIntent): {
       };
     }
 
+    case 'AMMCreate': {
+      const amount = formatAssetForXrpl(intent.amount1);
+      const amount2 = formatAssetForXrpl(intent.amount2);
+      const tradingFee = Math.max(0, Math.min(1000, Math.round(intent.tradingFeeBps * 10)));
+      const tx: Record<string, unknown> = {
+        TransactionType: 'AMMCreate',
+        Account: intent.account,
+        Amount: amount,
+        Amount2: amount2,
+        TradingFee: tradingFee,
+      };
+      return {
+        tx,
+        summaryLines: [
+          { label: 'Action', value: 'Create XLS-30 AMM Pool' },
+          { label: 'Seed Asset 1', value: formatXrplAmount(amount) },
+          { label: 'Seed Asset 2', value: formatXrplAmount(amount2) },
+          { label: 'Trading Fee', value: `${(tradingFee / 1000).toFixed(2)}%` },
+        ],
+      };
+    }
+
+    case 'AMMVote': {
+      const asset = formatAmmCurrencySpec(intent.asset1);
+      const asset2 = formatAmmCurrencySpec(intent.asset2);
+      const tradingFee = Math.max(0, Math.min(1000, Math.round(intent.tradingFeeBps * 10)));
+      const tx: Record<string, unknown> = {
+        TransactionType: 'AMMVote',
+        Account: intent.account,
+        Asset: asset,
+        Asset2: asset2,
+        TradingFee: tradingFee,
+      };
+      return {
+        tx,
+        summaryLines: [
+          { label: 'Action', value: 'AMM LP Trading Fee Vote' },
+          { label: 'Pool', value: `${decodeCurrencyCode(asset.currency)} / ${decodeCurrencyCode(asset2.currency)}` },
+          { label: 'Proposed Fee', value: `${(tradingFee / 1000).toFixed(2)}% (${intent.tradingFeeBps} bps)` },
+        ],
+      };
+    }
+
     case 'AMMDeposit': {
       const asset = formatAmmCurrencySpec(intent.asset1);
       const asset2 = formatAmmCurrencySpec(intent.asset2);
@@ -233,9 +299,9 @@ export function buildXrplTransactionFromIntent(intent: WalletTxIntent): {
       };
       if (intent.amount2 && Number(intent.amount2.value) > 0) {
         tx.Amount2 = formatAssetForXrpl(intent.amount2);
-        tx.Flags = 0x00100000; // tfTwoAsset
+        tx.Flags = 0x00100000;
       } else {
-        tx.Flags = 0x00080000; // tfSingleAsset
+        tx.Flags = 0x00080000;
       }
       return {
         tx,
@@ -258,10 +324,10 @@ export function buildXrplTransactionFromIntent(intent: WalletTxIntent): {
         Asset2: asset2,
       };
       if (intent.withdrawAll) {
-        tx.Flags = 0x00020000; // tfWithdrawAll
+        tx.Flags = 0x00020000;
       } else if (intent.amount1) {
         tx.Amount = formatAssetForXrpl(intent.amount1);
-        tx.Flags = 0x00080000; // tfSingleAsset
+        tx.Flags = 0x00080000;
       } else {
         throw new Error('Specify an amount to withdraw or enable Withdraw All');
       }
@@ -312,14 +378,13 @@ export function buildXrplTransactionFromIntent(intent: WalletTxIntent): {
     }
 
     case 'EscrowFinish': {
-      const tx: Record<string, unknown> = {
-        TransactionType: 'EscrowFinish',
-        Account: intent.account,
-        Owner: intent.owner.trim(),
-        OfferSequence: intent.offerSequence,
-      };
       return {
-        tx,
+        tx: {
+          TransactionType: 'EscrowFinish',
+          Account: intent.account,
+          Owner: intent.owner.trim(),
+          OfferSequence: intent.offerSequence,
+        },
         summaryLines: [
           { label: 'Action', value: 'Finish / Release Unlocked Escrow' },
           { label: 'Escrow Owner', value: intent.owner.trim() },
@@ -329,14 +394,13 @@ export function buildXrplTransactionFromIntent(intent: WalletTxIntent): {
     }
 
     case 'EscrowCancel': {
-      const tx: Record<string, unknown> = {
-        TransactionType: 'EscrowCancel',
-        Account: intent.account,
-        Owner: intent.owner.trim(),
-        OfferSequence: intent.offerSequence,
-      };
       return {
-        tx,
+        tx: {
+          TransactionType: 'EscrowCancel',
+          Account: intent.account,
+          Owner: intent.owner.trim(),
+          OfferSequence: intent.offerSequence,
+        },
         summaryLines: [
           { label: 'Action', value: 'Cancel Expired Escrow' },
           { label: 'Escrow Owner', value: intent.owner.trim() },
@@ -374,14 +438,13 @@ export function buildXrplTransactionFromIntent(intent: WalletTxIntent): {
 
     case 'CheckCash': {
       const amount = formatAssetForXrpl(intent.amount);
-      const tx: Record<string, unknown> = {
-        TransactionType: 'CheckCash',
-        Account: intent.account,
-        CheckID: intent.checkId.trim(),
-        Amount: amount,
-      };
       return {
-        tx,
+        tx: {
+          TransactionType: 'CheckCash',
+          Account: intent.account,
+          CheckID: intent.checkId.trim(),
+          Amount: amount,
+        },
         summaryLines: [
           { label: 'Action', value: 'Cash Incoming Check' },
           { label: 'Check ID', value: `${intent.checkId.slice(0, 12)}…` },
@@ -391,13 +454,12 @@ export function buildXrplTransactionFromIntent(intent: WalletTxIntent): {
     }
 
     case 'CheckCancel': {
-      const tx: Record<string, unknown> = {
-        TransactionType: 'CheckCancel',
-        Account: intent.account,
-        CheckID: intent.checkId.trim(),
-      };
       return {
-        tx,
+        tx: {
+          TransactionType: 'CheckCancel',
+          Account: intent.account,
+          CheckID: intent.checkId.trim(),
+        },
         summaryLines: [
           { label: 'Action', value: 'Cancel Check' },
           { label: 'Check ID', value: `${intent.checkId.slice(0, 12)}…` },
@@ -407,7 +469,6 @@ export function buildXrplTransactionFromIntent(intent: WalletTxIntent): {
 
     case 'NFTokenMint': {
       const flags = (intent.burnable ? 0x00000001 : 0) | (intent.transferable ? 0x00000008 : 0);
-      // XLS-20 TransferFee: 0..50000 (where 1000 = 1.00% = 100 bps, so 1 bps = 10 units)
       const transferFeeUnits = intent.transferable
         ? Math.max(0, Math.min(50_000, Math.round(intent.transferFeeBps * 10)))
         : 0;
@@ -457,17 +518,225 @@ export function buildXrplTransactionFromIntent(intent: WalletTxIntent): {
     }
 
     case 'NFTokenBurn': {
-      const tx: Record<string, unknown> = {
-        TransactionType: 'NFTokenBurn',
-        Account: intent.account,
-        NFTokenID: intent.nftokenId.trim(),
-      };
       return {
-        tx,
+        tx: {
+          TransactionType: 'NFTokenBurn',
+          Account: intent.account,
+          NFTokenID: intent.nftokenId.trim(),
+        },
         summaryLines: [
           { label: 'Action', value: 'Burn NFToken Permanently' },
           { label: 'NFToken ID', value: `${intent.nftokenId.slice(0, 12)}…` },
         ],
+      };
+    }
+
+    case 'SignerListSet': {
+      if (intent.signerQuorum < 0) {
+        throw new Error('SignerQuorum must be >= 0 (0 deletes the SignerList)');
+      }
+      const entries =
+        intent.signerQuorum === 0
+          ? undefined
+          : intent.signers.map((s) => {
+              if (!isValidClassicAddress(s.account.trim())) {
+                throw new Error(`Invalid signer classic r-address: ${s.account}`);
+              }
+              return {
+                SignerEntry: {
+                  Account: s.account.trim(),
+                  SignerWeight: Math.max(1, Math.floor(s.weight)),
+                },
+              };
+            });
+      const totalWeight = intent.signers.reduce((acc, s) => acc + Math.max(1, Math.floor(s.weight)), 0);
+      if (intent.signerQuorum > 0 && totalWeight < intent.signerQuorum) {
+        throw new Error(`Total signer weights (${totalWeight}) must be >= SignerQuorum (${intent.signerQuorum})`);
+      }
+
+      const tx: Record<string, unknown> = {
+        TransactionType: 'SignerListSet',
+        Account: intent.account,
+        SignerQuorum: Math.floor(intent.signerQuorum),
+        ...(entries ? { SignerEntries: entries } : {}),
+      };
+      return {
+        tx,
+        summaryLines: [
+          { label: 'Action', value: intent.signerQuorum === 0 ? 'Remove Multi-Sig SignerList' : 'Configure Multi-Sig SignerList' },
+          { label: 'Signer Quorum', value: String(intent.signerQuorum) },
+          { label: 'Signers Count', value: String(intent.signers.length) },
+        ],
+      };
+    }
+
+    case 'AccountSet': {
+      const tx: Record<string, unknown> = {
+        TransactionType: 'AccountSet',
+        Account: intent.account,
+      };
+      if (intent.domain !== undefined) {
+        tx.Domain = intent.domain.trim() ? utf8ToHex(intent.domain.trim().toLowerCase()) : '';
+      }
+      // AccountSet SetFlag values: 8 = asfDefaultRipple, 1 = asfRequireDest, 16 = asfAllowTrustLineClawback
+      if (intent.enableDefaultRipple) tx.SetFlag = 8;
+      else if (intent.enableRequireDest) tx.SetFlag = 1;
+      else if (intent.enableAllowClawback) tx.SetFlag = 16;
+
+      return {
+        tx,
+        summaryLines: [
+          { label: 'Action', value: 'Update AccountRoot Settings (`AccountSet`)' },
+          ...(intent.domain !== undefined ? [{ label: 'Domain', value: intent.domain || '(clear)' }] : []),
+          ...(tx.SetFlag ? [{ label: 'SetFlag', value: String(tx.SetFlag) }] : []),
+        ],
+      };
+    }
+
+    case 'MPTokenIssuanceCreate': {
+      let flags = 0;
+      if (intent.canLock) flags |= 0x00000002;
+      if (intent.requireAuth) flags |= 0x00000004;
+      if (intent.canEscrow) flags |= 0x00000008;
+      if (intent.canTrade) flags |= 0x00000010;
+      if (intent.canTransfer) flags |= 0x00000020;
+      if (intent.canClawback) flags |= 0x00000040;
+
+      const transferFee = intent.canTransfer && intent.transferFeeBps
+        ? Math.max(0, Math.min(50_000, Math.round(intent.transferFeeBps * 10)))
+        : 0;
+
+      const tx: Record<string, unknown> = {
+        TransactionType: 'MPTokenIssuanceCreate',
+        Account: intent.account,
+        AssetScale: Math.max(0, Math.min(19, Math.floor(intent.assetScale || 0))),
+        Flags: flags,
+        ...(intent.maximumAmount?.trim() ? { MaximumAmount: intent.maximumAmount.trim() } : {}),
+        ...(transferFee > 0 ? { TransferFee: transferFee } : {}),
+        ...(intent.metadataText?.trim() ? { MPTokenMetadata: utf8ToHex(intent.metadataText.trim()) } : {}),
+      };
+      return {
+        tx,
+        summaryLines: [
+          { label: 'Action', value: 'Create Multi-Purpose Token Issuance (MPT)' },
+          { label: 'Asset Scale', value: String(tx.AssetScale) },
+          { label: 'Max Supply', value: intent.maximumAmount?.trim() || 'Unlimited' },
+        ],
+      };
+    }
+
+    case 'MPTokenAuthorize': {
+      const tx: Record<string, unknown> = {
+        TransactionType: 'MPTokenAuthorize',
+        Account: intent.account,
+        MPTokenIssuanceID: intent.mptIssuanceId.trim(),
+        ...(intent.holder?.trim() ? { Holder: intent.holder.trim() } : {}),
+        ...(intent.unauthorize ? { Flags: 0x00000001 } : {}),
+      };
+      return {
+        tx,
+        summaryLines: [
+          { label: 'Action', value: intent.unauthorize ? 'Unauthorize MPToken' : 'Authorize / Opt-In MPToken' },
+          { label: 'Issuance ID', value: `${intent.mptIssuanceId.slice(0, 14)}…` },
+        ],
+      };
+    }
+
+    case 'Clawback': {
+      if (!isValidClassicAddress(intent.holder.trim())) {
+        throw new Error('Invalid holder r-address for Clawback');
+      }
+      const currency = encodeCurrencyCode(intent.currency);
+      const tx: Record<string, unknown> = {
+        TransactionType: 'Clawback',
+        Account: intent.account,
+        Amount: {
+          currency,
+          issuer: intent.holder.trim(), // Per XLS-39 Clawback spec, Amount.issuer specifies the token holder
+          value: intent.value.trim(),
+        },
+      };
+      return {
+        tx,
+        summaryLines: [
+          { label: 'Action', value: 'Regulated Issuer Clawback' },
+          { label: 'Holder', value: intent.holder.trim() },
+          { label: 'Amount', value: `${intent.value.trim()} ${decodeCurrencyCode(currency)}` },
+        ],
+      };
+    }
+
+    case 'OracleSet': {
+      const tx: Record<string, unknown> = {
+        TransactionType: 'OracleSet',
+        Account: intent.account,
+        OracleDocumentID: Math.max(0, Math.floor(intent.oracleDocumentId)),
+        Provider: utf8ToHex(intent.provider.trim() || 'XRPL-CC'),
+        AssetClass: utf8ToHex(intent.assetClass.trim() || 'currency'),
+        LastUpdateTime: Math.floor(Date.now() / 1000),
+        PriceDataSeries: [
+          {
+            PriceData: {
+              BaseAsset: encodeCurrencyCode(intent.baseAsset),
+              QuoteAsset: encodeCurrencyCode(intent.quoteAsset),
+              AssetPrice: Math.max(0, Math.round(intent.assetPrice)),
+              Scale: Math.max(0, Math.min(10, Math.floor(intent.scale))),
+            },
+          },
+        ],
+      };
+      return {
+        tx,
+        summaryLines: [
+          { label: 'Action', value: 'Publish XLS-47 On-Ledger Price Oracle' },
+          { label: 'Pair', value: `${intent.baseAsset}/${intent.quoteAsset}` },
+          {
+            label: 'Scaled Price',
+            value: String(intent.assetPrice / Math.pow(10, Math.max(0, Math.floor(intent.scale)))),
+          },
+        ],
+      };
+    }
+
+    case 'OracleDelete': {
+      return {
+        tx: {
+          TransactionType: 'OracleDelete',
+          Account: intent.account,
+          OracleDocumentID: Math.max(0, Math.floor(intent.oracleDocumentId)),
+        },
+        summaryLines: [
+          { label: 'Action', value: 'Delete Price Oracle Document' },
+          { label: 'Document ID', value: String(intent.oracleDocumentId) },
+        ],
+      };
+    }
+
+    case 'DIDSet': {
+      const tx: Record<string, unknown> = {
+        TransactionType: 'DIDSet',
+        Account: intent.account,
+        ...(intent.uri?.trim() ? { URI: utf8ToHex(intent.uri.trim()) } : {}),
+        ...(intent.didDocument?.trim() ? { DIDDocument: utf8ToHex(intent.didDocument.trim()) } : {}),
+        ...(intent.dataText?.trim() ? { Data: utf8ToHex(intent.dataText.trim()) } : {}),
+      };
+      return {
+        tx,
+        summaryLines: [
+          { label: 'Action', value: 'Publish XLS-40 Decentralized Identity (`DIDSet`)' },
+          { label: 'DID', value: `did:xrpl:${intent.account}` },
+          ...(intent.uri?.trim() ? [{ label: 'URI', value: intent.uri.trim() }] : []),
+        ],
+      };
+    }
+
+    case 'DIDDelete': {
+      return {
+        tx: {
+          TransactionType: 'DIDDelete',
+          Account: intent.account,
+        },
+        summaryLines: [{ label: 'Action', value: 'Delete On-Ledger DID (`DIDDelete`)' }],
       };
     }
   }
@@ -795,7 +1064,9 @@ export class WalletVaultService {
 
   public async addWatchOnly(
     label: string,
-    addressInput: string
+    addressInput: string,
+    isHardwareLedger = false,
+    derivationPath?: string
   ): Promise<{ ok: boolean; account?: WalletAccountPublic; status?: VaultStatus; error?: string }> {
     const addr = addressInput.trim();
     if (!isValidClassicAddress(addr)) {
@@ -808,10 +1079,11 @@ export class WalletVaultService {
     }
 
     const account: WalletAccountPublic = {
-      id: `watch-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`,
-      label: label.trim() || `Watch ${addr.slice(0, 6)}`,
+      id: `${isHardwareLedger ? 'ledger' : 'watch'}-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`,
+      label: label.trim() || `${isHardwareLedger ? 'Ledger' : 'Watch'} ${addr.slice(0, 6)}`,
       address: addr,
-      kind: 'watch-only',
+      kind: isHardwareLedger ? 'hardware-ledger' : 'watch-only',
+      derivationPath: derivationPath || (isHardwareLedger ? "44'/144'/0'/0/0" : undefined),
       createdAt: Date.now(),
     };
 
@@ -902,7 +1174,7 @@ export class WalletVaultService {
         color: { dark: '#22d3ee', light: '#061022' },
       });
     } catch {
-      // ignore QR failure
+      // ignore
     }
 
     const [infoRes, serverRes, linesRes, offersRes, objectsRes, nftsRes, txRes] =
@@ -944,6 +1216,7 @@ export class WalletVaultService {
         sequence: 0,
         ownerCount: 0,
         flags: decodeIssuerRiskFlags(0),
+        signerList: null,
         tokens: [],
         offers: [],
         escrows: [],
@@ -1011,6 +1284,8 @@ export class WalletVaultService {
 
     const escrows: WalletEscrowEntry[] = [];
     const checks: WalletCheckEntry[] = [];
+    let signerList: SignerListInfo | null = null;
+
     if (objectsRes.status === 'fulfilled') {
       const objs = ((objectsRes.value.result as Record<string, unknown>)?.account_objects ?? []) as Array<
         Record<string, unknown>
@@ -1027,12 +1302,7 @@ export class WalletVaultService {
               typeof obj.FinishAfter === 'number' ? rippleTimeToUnixMs(obj.FinishAfter) : undefined,
             cancelAfterMs:
               typeof obj.CancelAfter === 'number' ? rippleTimeToUnixMs(obj.CancelAfter) : undefined,
-            offerSequence:
-              typeof obj.OfferSequence === 'number'
-                ? obj.OfferSequence
-                : typeof obj.PreviousTxnLgrSeq === 'number'
-                  ? undefined
-                  : undefined,
+            offerSequence: typeof obj.OfferSequence === 'number' ? obj.OfferSequence : undefined,
             condition: typeof obj.Condition === 'string' ? obj.Condition : undefined,
           });
         } else if (entryType === 'Check') {
@@ -1049,6 +1319,15 @@ export class WalletVaultService {
             destinationTag:
               typeof obj.DestinationTag === 'number' ? obj.DestinationTag : undefined,
           });
+        } else if (entryType === 'SignerList') {
+          const entries = (obj.SignerEntries ?? []) as Array<{ SignerEntry?: { Account?: string; SignerWeight?: number } }>;
+          signerList = {
+            signerQuorum: Number(obj.SignerQuorum ?? 0),
+            signers: entries.map((e) => ({
+              account: String(e.SignerEntry?.Account ?? ''),
+              weight: Number(e.SignerEntry?.SignerWeight ?? 1),
+            })),
+          };
         }
       }
     }
@@ -1102,6 +1381,7 @@ export class WalletVaultService {
       ownerCount,
       domain: flags.domain,
       flags,
+      signerList,
       tokens,
       offers,
       escrows,
@@ -1110,6 +1390,95 @@ export class WalletVaultService {
       recentTransactions,
       qrSvg,
     };
+  }
+
+  public async findBestSwapPath(
+    stream: XrplStreamManager,
+    params: {
+      sourceAccount: string;
+      destinationAccount: string;
+      destinationAsset: AssetSpec;
+      slippagePct: number;
+    }
+  ): Promise<PathFindQuote> {
+    try {
+      const destAmount = formatAssetForXrpl(params.destinationAsset);
+      const res = await stream.request('ripple_path_find', {
+        source_account: params.sourceAccount.trim(),
+        destination_account: params.destinationAccount.trim(),
+        destination_amount: destAmount,
+      });
+      const alternatives = ((res.result as Record<string, unknown>)?.alternatives ?? []) as Array<
+        Record<string, unknown>
+      >;
+
+      if (alternatives.length === 0) {
+        return {
+          ok: false,
+          sourceAmountDisplay: '—',
+          sendMaxSpec: params.destinationAsset,
+          deliverMinSpec: params.destinationAsset,
+          destinationAmountSpec: params.destinationAsset,
+          hopsSummary: 'No paths found',
+          error: 'No liquid path found across XRPL orderbooks or AMM pools for this pair/size.',
+        };
+      }
+
+      const best = alternatives[0];
+      const srcAmt = best.source_amount;
+      const slipMult = 1 + Math.max(0.1, params.slippagePct) / 100;
+      const minMult = Math.max(0.5, 1 - Math.max(0.1, params.slippagePct) / 100);
+
+      let sendMaxSpec: AssetSpec;
+      if (typeof srcAmt === 'string') {
+        const srcXrp = dropsToXrpNumber(srcAmt);
+        sendMaxSpec = {
+          currency: 'XRP',
+          value: (srcXrp * slipMult).toFixed(6),
+        };
+      } else if (isIssuedAmount(srcAmt)) {
+        sendMaxSpec = {
+          currency: srcAmt.currency,
+          issuer: srcAmt.issuer,
+          value: (Number(srcAmt.value) * slipMult).toPrecision(8),
+        };
+      } else {
+        throw new Error('Unexpected source_amount in ripple_path_find response');
+      }
+
+      const deliverMinSpec: AssetSpec = {
+        ...params.destinationAsset,
+        value:
+          params.destinationAsset.currency.toUpperCase() === 'XRP'
+            ? (Number(params.destinationAsset.value) * minMult).toFixed(6)
+            : (Number(params.destinationAsset.value) * minMult).toPrecision(8),
+      };
+
+      const pathsComputed = (best.paths_computed ?? []) as unknown[];
+
+      return {
+        ok: true,
+        sourceAmountDisplay: formatXrplAmount(srcAmt),
+        sendMaxSpec,
+        deliverMinSpec,
+        destinationAmountSpec: params.destinationAsset,
+        pathsComputed,
+        hopsSummary:
+          pathsComputed.length > 0
+            ? `${pathsComputed.length} liquidity route(s) via CLOB / Auto-Bridge / AMM`
+            : 'Direct XRP / AMM route',
+      };
+    } catch (err) {
+      return {
+        ok: false,
+        sourceAmountDisplay: '—',
+        sendMaxSpec: params.destinationAsset,
+        deliverMinSpec: params.destinationAsset,
+        destinationAmountSpec: params.destinationAsset,
+        hopsSummary: '',
+        error: err instanceof Error ? err.message : 'ripple_path_find failed',
+      };
+    }
   }
 
   public async preflightTransaction(
@@ -1142,7 +1511,6 @@ export class WalletVaultService {
       };
     }
 
-    // Query live account Sequence + server Fee + validated ledger
     const [acctRes, serverRes] = await Promise.allSettled([
       stream.request('account_info', { account: intent.account, ledger_index: 'current' }),
       stream.request('server_info'),
@@ -1171,7 +1539,7 @@ export class WalletVaultService {
     >;
     const sequence = Number(acctData.Sequence ?? 0);
 
-    let feeDropsNum = 12;
+    let feeDropsNum = intent.kind === 'AMMCreate' ? 200_000 : 12; // AMMCreate requires owner reserve / special fee awareness
     let lastLedgerSeq: number | undefined;
     let baseReserveXrp = 1;
 
@@ -1184,10 +1552,18 @@ export class WalletVaultService {
       if (valLedger) {
         const baseFeeXrp = Number(valLedger.base_fee_xrp ?? 0.00001);
         const loadFactor = Number(info.load_factor ?? 1);
-        feeDropsNum = Math.min(
-          MAX_SAFE_FEE_DROPS,
-          Math.max(12, Math.ceil(baseFeeXrp * 1_000_000 * loadFactor))
-        );
+        if (intent.kind === 'AMMCreate') {
+          const incReserveDrops = Math.round(Number(valLedger.reserve_inc_xrp ?? 0.2) * 1_000_000);
+          feeDropsNum = Math.max(incReserveDrops, 200_000);
+          warnings.push(
+            `AMMCreate burns one owner reserve increment (${dropsToXrpString(feeDropsNum, 2)} XRP) as anti-spam protocol fee.`
+          );
+        } else {
+          feeDropsNum = Math.min(
+            MAX_SAFE_FEE_DROPS,
+            Math.max(12, Math.ceil(baseFeeXrp * 1_000_000 * loadFactor))
+          );
+        }
         if (typeof valLedger.seq === 'number') {
           lastLedgerSeq = valLedger.seq + 20;
         }
@@ -1197,7 +1573,6 @@ export class WalletVaultService {
 
     let blockingError: string | undefined;
 
-    // Destination safety checks for Payment (RequireDestTag & unfunded reserve activation)
     if (intent.kind === 'Payment') {
       try {
         const destRes = await stream.request('account_info', {
@@ -1242,17 +1617,106 @@ export class WalletVaultService {
       ...(lastLedgerSeq ? { LastLedgerSequence: lastLedgerSeq } : {}),
     };
 
+    let unsignedQrSvg: string | undefined;
+    let signingHex: string | undefined;
+    try {
+      unsignedQrSvg = await QRCode.toString(JSON.stringify(txJson), {
+        type: 'svg',
+        margin: 1,
+        color: { dark: '#22d3ee', light: '#061022' },
+      });
+    } catch {
+      // ignore QR overflow
+    }
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      signingHex = encodeForSigning({ ...txJson, SigningPubKey: '' } as any);
+    } catch {
+      // optional
+    }
+
     return {
       ok: !blockingError,
       networkId: streamStatus.networkId,
       endpoint: streamStatus.endpoint,
       txJson,
+      unsignedQrSvg,
+      signingHex,
       feeDrops: String(feeDropsNum),
       feeXrp: dropsToXrpString(feeDropsNum, 6),
       summaryLines: built.summaryLines,
       warnings,
       blockingError,
     };
+  }
+
+  private async broadcastAndConfirmBlob(
+    stream: XrplStreamManager,
+    txBlob: string,
+    knownHash?: string
+  ): Promise<TxSubmitResult> {
+    try {
+      const submitRes = await stream.request('submit', { tx_blob: txBlob });
+      const resBody = (submitRes.result ?? {}) as Record<string, unknown>;
+      const engineResult = String(resBody.engine_result ?? 'unknown');
+      const engineMessage = String(resBody.engine_result_message ?? '');
+      const txJsonResp = resBody.tx_json as Record<string, unknown> | undefined;
+      const hash = knownHash || String(txJsonResp?.hash ?? '');
+
+      const prelimAccepted =
+        engineResult === 'tesSUCCESS' ||
+        engineResult.startsWith('terQUEUED') ||
+        engineResult === 'terPRE_SEQ';
+
+      if (!prelimAccepted) {
+        return {
+          ok: false,
+          hash,
+          engineResult,
+          engineMessage,
+          error: `${engineResult}: ${engineMessage}`,
+        };
+      }
+
+      if (hash) {
+        for (let attempt = 0; attempt < 4; attempt++) {
+          await new Promise((r) => setTimeout(r, 1300));
+          try {
+            const txLookup = await stream.request('tx', { transaction: hash });
+            const txRes = (txLookup.result ?? {}) as Record<string, unknown>;
+            if (txRes.validated) {
+              const meta = txRes.meta as Record<string, unknown> | undefined;
+              const finalCode = String(meta?.TransactionResult ?? engineResult);
+              return {
+                ok: finalCode === 'tesSUCCESS',
+                hash,
+                engineResult: finalCode,
+                engineMessage,
+                validated: true,
+                ledgerIndex: typeof txRes.ledger_index === 'number' ? txRes.ledger_index : undefined,
+                ...(finalCode !== 'tesSUCCESS' ? { error: `Validated with ${finalCode}` } : {}),
+              };
+            }
+          } catch {
+            // still pending
+          }
+        }
+      }
+
+      return {
+        ok: true,
+        hash,
+        engineResult,
+        engineMessage,
+        validated: false,
+      };
+    } catch (err) {
+      return {
+        ok: false,
+        hash: knownHash,
+        error: err instanceof Error ? err.message : 'Transaction broadcast failed',
+      };
+    }
   }
 
   public async signAndSubmit(
@@ -1269,16 +1733,13 @@ export class WalletVaultService {
     if (!seed) {
       return {
         ok: false,
-        error: 'Selected account is watch-only or its signing key is not in the unlocked vault.',
+        error: 'Selected account is watch-only/hardware or its signing key is not in the unlocked vault.',
       };
     }
 
     const wallet = Wallet.fromSeed(seed);
     if (wallet.classicAddress !== intent.account) {
-      return {
-        ok: false,
-        error: 'Signing key address mismatch with transaction Account.',
-      };
+      return { ok: false, error: 'Signing key address mismatch with transaction Account.' };
     }
 
     const preflight = await this.preflightTransaction(stream, intent);
@@ -1289,67 +1750,86 @@ export class WalletVaultService {
       };
     }
 
-    // Offline canonical binary signing inside isolated Electron Main process
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const signed = wallet.sign(preflight.txJson as any);
+    return this.broadcastAndConfirmBlob(stream, signed.tx_blob, signed.hash);
+  }
+
+  public async submitSignedBlob(stream: XrplStreamManager, txBlobInput: string): Promise<TxSubmitResult> {
+    const clean = txBlobInput.trim();
+    try {
+      // Accepts either raw hex tx_blob OR JSON containing { tx_blob } or signed tx_json
+      let blob = clean;
+      if (clean.startsWith('{')) {
+        const parsed = JSON.parse(clean) as Record<string, unknown>;
+        if (typeof parsed.tx_blob === 'string') {
+          blob = parsed.tx_blob;
+        } else {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          blob = encode(parsed as any);
+        }
+      } else {
+        decode(blob); // Validate binary XRPL serialization before submitting
+      }
+      return this.broadcastAndConfirmBlob(stream, blob);
+    } catch (err) {
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : 'Invalid signed tx_blob hex or JSON payload',
+      };
+    }
+  }
+
+  public async signMultisigPartial(
+    walletId: string,
+    txJsonInput: Record<string, unknown>
+  ): Promise<{ ok: boolean; txBlob?: string; signerAddress?: string; error?: string }> {
+    if (!this.unlockedSeeds) {
+      return { ok: false, error: 'Unlock your vault before producing a multi-signature.' };
+    }
+    this.touchAutoLock();
+
+    const seed = this.unlockedSeeds.get(walletId);
+    if (!seed) {
+      return { ok: false, error: 'Selected wallet does not have a local signing seed.' };
+    }
 
     try {
-      const submitRes = await stream.request('submit', { tx_blob: signed.tx_blob });
-      const resBody = (submitRes.result ?? {}) as Record<string, unknown>;
-      const engineResult = String(resBody.engine_result ?? 'unknown');
-      const engineMessage = String(resBody.engine_result_message ?? '');
-
-      const prelimAccepted =
-        engineResult === 'tesSUCCESS' ||
-        engineResult.startsWith('terQUEUED') ||
-        engineResult === 'terPRE_SEQ';
-
-      if (!prelimAccepted) {
-        return {
-          ok: false,
-          hash: signed.hash,
-          engineResult,
-          engineMessage,
-          error: `${engineResult}: ${engineMessage}`,
-        };
-      }
-
-      // Poll up to ~5s for validated ledger confirmation
-      for (let attempt = 0; attempt < 4; attempt++) {
-        await new Promise((r) => setTimeout(r, 1300));
-        try {
-          const txLookup = await stream.request('tx', { transaction: signed.hash });
-          const txRes = (txLookup.result ?? {}) as Record<string, unknown>;
-          if (txRes.validated) {
-            const meta = txRes.meta as Record<string, unknown> | undefined;
-            const finalCode = String(meta?.TransactionResult ?? engineResult);
-            return {
-              ok: finalCode === 'tesSUCCESS',
-              hash: signed.hash,
-              engineResult: finalCode,
-              engineMessage,
-              validated: true,
-              ledgerIndex: typeof txRes.ledger_index === 'number' ? txRes.ledger_index : undefined,
-              ...(finalCode !== 'tesSUCCESS' ? { error: `Validated with ${finalCode}` } : {}),
-            };
-          }
-        } catch {
-          // tx may still be in open ledger
-        }
-      }
-
+      const wallet = Wallet.fromSeed(seed);
+      const txCopy = {
+        ...txJsonInput,
+        SigningPubKey: '',
+      };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const signed = wallet.sign(txCopy as any, true);
       return {
         ok: true,
-        hash: signed.hash,
-        engineResult,
-        engineMessage,
-        validated: false,
+        txBlob: signed.tx_blob,
+        signerAddress: wallet.classicAddress,
       };
     } catch (err) {
       return {
         ok: false,
-        hash: signed.hash,
-        error: err instanceof Error ? err.message : 'Transaction broadcast failed',
+        error: err instanceof Error ? err.message : 'Multi-sig signing failed',
+      };
+    }
+  }
+
+  public async combineAndSubmitMultisig(
+    stream: XrplStreamManager,
+    partialBlobs: string[]
+  ): Promise<TxSubmitResult> {
+    const cleaned = partialBlobs.map((b) => b.trim()).filter(Boolean);
+    if (cleaned.length === 0) {
+      return { ok: false, error: 'Provide at least one partial multi-signature blob.' };
+    }
+    try {
+      const combinedBlob = multisign(cleaned);
+      return this.broadcastAndConfirmBlob(stream, combinedBlob);
+    } catch (err) {
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : 'Failed to combine multi-signed transaction blobs',
       };
     }
   }

@@ -26,7 +26,7 @@ export type TxCategory =
 export interface LedgerSnapshot {
   ledgerIndex: number;
   ledgerHash: string;
-  ledgerTime: number; // Unix ms
+  ledgerTime: number;
   txnCount: number;
   feeBaseDrops: number;
   reserveBaseXrp: number;
@@ -51,7 +51,7 @@ export interface LiveTransaction {
   validated: boolean;
   engineResult?: string;
   ledgerIndex?: number;
-  timestamp: number; // Unix ms
+  timestamp: number;
   isWhale: boolean;
   raw?: Record<string, unknown>;
 }
@@ -162,6 +162,8 @@ export interface TokenOnLedgerReport {
     account: string;
     asset1Amount: string;
     asset2Amount: string;
+    asset1Numeric?: number;
+    asset2Numeric?: number;
     tradingFeeBps: number;
     lpTokenSupply: string;
   } | null;
@@ -258,7 +260,43 @@ export interface DesktopNotificationPayload {
 }
 
 // ============================================================================
-// Encrypted Local Wallet Vault & DeFi Transaction Suite Types
+// Track 1: Docker Node Lifecycle & Visual rippled.cfg Studio Types
+// ============================================================================
+
+export interface DockerNodeStatus {
+  dockerInstalled: boolean;
+  daemonRunning: boolean;
+  dockerVersion?: string;
+  containerExists: boolean;
+  containerRunning: boolean;
+  containerName: string;
+  containerState?: string;
+  image?: string;
+  network?: 'mainnet' | 'testnet' | 'devnet';
+  configDir: string;
+  portsSummary?: string;
+  error?: string;
+}
+
+export interface DockerProvisionRequest {
+  network: 'mainnet' | 'testnet' | 'devnet';
+  sizing: '16gb-light' | '32gb-standard' | '64gb-full';
+  dbBackend: 'NuDB' | 'RocksDB';
+  onlineDeleteLedgers: number;
+  image?: string;
+}
+
+export interface NodeConfigBundle {
+  configDir: string;
+  rippledCfgPath: string;
+  validatorsTxtPath: string;
+  rippledCfg: string;
+  validatorsTxt: string;
+  existsOnDisk: boolean;
+}
+
+// ============================================================================
+// Wallet, Hardware/QR, Multi-Sig, Pro DEX Pathfinding & Institutional Primitives
 // ============================================================================
 
 export type WalletAlgorithm = 'ed25519' | 'ecdsa-secp256k1';
@@ -267,8 +305,9 @@ export interface WalletAccountPublic {
   id: string;
   label: string;
   address: string;
-  kind: 'custodial' | 'watch-only';
+  kind: 'custodial' | 'watch-only' | 'hardware-ledger';
   algorithm?: WalletAlgorithm;
+  derivationPath?: string;
   createdAt: number;
 }
 
@@ -332,6 +371,11 @@ export interface WalletNftEntry {
   flags: number;
 }
 
+export interface SignerListInfo {
+  signerQuorum: number;
+  signers: Array<{ account: string; weight: number }>;
+}
+
 export interface WalletPortfolioSnapshot {
   address: string;
   funded: boolean;
@@ -345,6 +389,7 @@ export interface WalletPortfolioSnapshot {
   ownerCount: number;
   domain?: string;
   flags: IssuerRiskFlags;
+  signerList?: SignerListInfo | null;
   tokens: WalletTokenBalance[];
   offers: WalletOpenOffer[];
   escrows: WalletEscrowEntry[];
@@ -356,9 +401,20 @@ export interface WalletPortfolioSnapshot {
 }
 
 export interface AssetSpec {
-  currency: string; // 'XRP' or 3-char or 40-hex currencyRaw
+  currency: string;
   issuer?: string;
   value: string;
+}
+
+export interface PathFindQuote {
+  ok: boolean;
+  sourceAmountDisplay: string;
+  sendMaxSpec: AssetSpec;
+  deliverMinSpec: AssetSpec;
+  destinationAmountSpec: AssetSpec;
+  pathsComputed?: unknown[];
+  hopsSummary: string;
+  error?: string;
 }
 
 export type WalletTxIntent =
@@ -367,6 +423,9 @@ export type WalletTxIntent =
       account: string;
       destination: string;
       asset: AssetSpec;
+      sendMax?: AssetSpec;
+      deliverMin?: AssetSpec;
+      paths?: unknown[];
       destinationTag?: number;
       memoText?: string;
     }
@@ -381,14 +440,28 @@ export type WalletTxIntent =
   | {
       kind: 'OfferCreate';
       account: string;
-      takerGets: AssetSpec; // What the creator offers to give/sell
-      takerPays: AssetSpec; // What the creator wants to receive/buy
+      takerGets: AssetSpec;
+      takerPays: AssetSpec;
       orderMode?: 'limit' | 'passive' | 'ioc' | 'fok';
     }
   | {
       kind: 'OfferCancel';
       account: string;
       offerSequence: number;
+    }
+  | {
+      kind: 'AMMCreate';
+      account: string;
+      amount1: AssetSpec;
+      amount2: AssetSpec;
+      tradingFeeBps: number; // 0..100 bps (0..1000 XRPL units)
+    }
+  | {
+      kind: 'AMMVote';
+      account: string;
+      asset1: { currency: string; issuer?: string };
+      asset2: { currency: string; issuer?: string };
+      tradingFeeBps: number;
     }
   | {
       kind: 'AMMDeposit';
@@ -468,6 +541,75 @@ export type WalletTxIntent =
       kind: 'NFTokenBurn';
       account: string;
       nftokenId: string;
+    }
+  | {
+      kind: 'SignerListSet';
+      account: string;
+      signerQuorum: number;
+      signers: Array<{ account: string; weight: number }>;
+    }
+  | {
+      kind: 'AccountSet';
+      account: string;
+      domain?: string;
+      enableDefaultRipple?: boolean;
+      enableRequireDest?: boolean;
+      enableAllowClawback?: boolean;
+    }
+  | {
+      kind: 'MPTokenIssuanceCreate';
+      account: string;
+      assetScale: number;
+      maximumAmount?: string;
+      transferFeeBps?: number;
+      metadataText?: string;
+      canTransfer: boolean;
+      canTrade: boolean;
+      canEscrow: boolean;
+      canClawback: boolean;
+      canLock: boolean;
+      requireAuth: boolean;
+    }
+  | {
+      kind: 'MPTokenAuthorize';
+      account: string;
+      mptIssuanceId: string;
+      holder?: string;
+      unauthorize?: boolean;
+    }
+  | {
+      kind: 'Clawback';
+      account: string;
+      currency: string;
+      holder: string;
+      value: string;
+    }
+  | {
+      kind: 'OracleSet';
+      account: string;
+      oracleDocumentId: number;
+      provider: string;
+      assetClass: string;
+      baseAsset: string;
+      quoteAsset: string;
+      assetPrice: number;
+      scale: number;
+    }
+  | {
+      kind: 'OracleDelete';
+      account: string;
+      oracleDocumentId: number;
+    }
+  | {
+      kind: 'DIDSet';
+      account: string;
+      uri?: string;
+      didDocument?: string;
+      dataText?: string;
+    }
+  | {
+      kind: 'DIDDelete';
+      account: string;
     };
 
 export interface TxPreflightPreview {
@@ -475,6 +617,8 @@ export interface TxPreflightPreview {
   networkId: NetworkId;
   endpoint: string;
   txJson: Record<string, unknown>;
+  unsignedQrSvg?: string;
+  signingHex?: string;
   feeDrops: string;
   feeXrp: string;
   summaryLines: Array<{ label: string; value: string }>;
@@ -490,6 +634,74 @@ export interface TxSubmitResult {
   validated?: boolean;
   ledgerIndex?: number;
   error?: string;
+}
+
+// ============================================================================
+// Track 4: Institutional Primitives Read Models
+// ============================================================================
+
+export interface OracleAggregateReport {
+  ok: boolean;
+  baseAsset: string;
+  quoteAsset: string;
+  entireSetMean?: string;
+  trimmedMean?: string;
+  median?: string;
+  size?: number;
+  time?: number;
+  error?: string;
+}
+
+export interface DidResolutionReport {
+  ok: boolean;
+  did: string;
+  address: string;
+  uri?: string;
+  didDocument?: string;
+  data?: string;
+  error?: string;
+}
+
+// ============================================================================
+// Track 5: SQLite Analytics, CSV Export, System Tray & Updater Types
+// ============================================================================
+
+export interface SqliteAnalyticsSummary {
+  dbPath: string;
+  dbSizeBytes: number;
+  recordedLedgers: number;
+  recordedTxJournal: number;
+  avgTpsRecent: number;
+  avgFeeDropsRecent: number;
+  peakTxnLedger: { ledgerIndex: number; txnCount: number } | null;
+  recentJournal: Array<{
+    id: number;
+    timestamp: number;
+    network: string;
+    txType: string;
+    account: string;
+    destination: string;
+    amountDisplay: string;
+    feeDrops: number;
+    hash: string;
+    status: string;
+  }>;
+  ledgerSeries: Array<{
+    ledgerIndex: number;
+    ledgerTime: number;
+    txnCount: number;
+    feeBaseDrops: number;
+    closeDurationMs: number;
+  }>;
+}
+
+export interface TrayAndUpdaterSettings {
+  minimizeToTray: boolean;
+  nodeWatchdogEnabled: boolean;
+  currentVersion: string;
+  updateState: 'idle' | 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error';
+  availableVersion?: string;
+  updateMessage?: string;
 }
 
 export interface XrplDesktopApi {
@@ -512,6 +724,8 @@ export interface XrplDesktopApi {
   }>;
   inspectTokenOnLedger: (currencyRaw: string, issuer: string) => Promise<TokenOnLedgerReport>;
   inspectQuery: (query: string) => Promise<InspectorResult>;
+
+  // Node Ops & Track 1 Docker + Config Studio
   nodeOpsPoll: (config: NodeConnectionConfig) => Promise<NodeOpsSnapshot>;
   nodeOpsAdminCommand: (
     config: NodeConnectionConfig,
@@ -519,9 +733,18 @@ export interface XrplDesktopApi {
     params?: Record<string, unknown>
   ) => Promise<{ ok: boolean; result?: unknown; error?: string }>;
   nodeOpsReadLogTail: (filePath: string, maxLines?: number) => Promise<{ ok: boolean; lines: string[]; error?: string }>;
-  notifyDesktop: (payload: DesktopNotificationPayload) => Promise<void>;
+  dockerGetStatus: () => Promise<DockerNodeStatus>;
+  dockerProvisionNode: (req: DockerProvisionRequest) => Promise<{ ok: boolean; message?: string; status?: DockerNodeStatus; error?: string }>;
+  dockerLifecycleAction: (action: 'start' | 'stop' | 'restart' | 'remove') => Promise<{ ok: boolean; message?: string; status?: DockerNodeStatus; error?: string }>;
+  dockerReadLogs: (tailLines?: number) => Promise<{ ok: boolean; lines: string[]; error?: string }>;
+  nodeConfigLoad: (customDir?: string) => Promise<NodeConfigBundle>;
+  nodeConfigSaveWithBackup: (payload: {
+    configDir?: string;
+    rippledCfg: string;
+    validatorsTxt: string;
+  }) => Promise<{ ok: boolean; backupPaths?: string[]; error?: string }>;
 
-  // Wallet Vault & DeFi IPC
+  // Wallet Vault, Hardware/QR, Multi-Sig & Pro DEX Pathfinding
   walletGetStatus: () => Promise<VaultStatus>;
   walletSetupVault: (passphrase: string) => Promise<{ ok: boolean; status?: VaultStatus; error?: string }>;
   walletUnlockVault: (passphrase: string) => Promise<{ ok: boolean; status?: VaultStatus; error?: string }>;
@@ -536,7 +759,9 @@ export interface XrplDesktopApi {
   ) => Promise<{ ok: boolean; account?: WalletAccountPublic; status?: VaultStatus; error?: string }>;
   walletAddWatchOnly: (
     label: string,
-    address: string
+    address: string,
+    isHardwareLedger?: boolean,
+    derivationPath?: string
   ) => Promise<{ ok: boolean; account?: WalletAccountPublic; status?: VaultStatus; error?: string }>;
   walletRemoveAccount: (walletId: string) => Promise<VaultStatus>;
   walletFetchPortfolio: (address: string) => Promise<WalletPortfolioSnapshot>;
@@ -546,7 +771,35 @@ export interface XrplDesktopApi {
   ) => Promise<{ ok: boolean; message?: string; error?: string }>;
   walletPreflightTx: (intent: WalletTxIntent) => Promise<TxPreflightPreview>;
   walletSignAndSubmitTx: (walletId: string, intent: WalletTxIntent) => Promise<TxSubmitResult>;
+  walletSubmitSignedBlob: (txBlobHex: string) => Promise<TxSubmitResult>;
+  walletSignMultisigPartial: (
+    walletId: string,
+    txJson: Record<string, unknown>
+  ) => Promise<{ ok: boolean; txBlob?: string; signerAddress?: string; error?: string }>;
+  walletCombineAndSubmitMultisig: (partialBlobs: string[]) => Promise<TxSubmitResult>;
+  dexFindBestPath: (params: {
+    sourceAccount: string;
+    destinationAccount: string;
+    destinationAsset: AssetSpec;
+    slippagePct: number;
+  }) => Promise<PathFindQuote>;
 
+  // Track 4: Institutional Primitives Queries
+  oracleQueryAggregate: (params: {
+    baseAsset: string;
+    quoteAsset: string;
+    oracles: Array<{ account: string; oracleDocumentId: number }>;
+  }) => Promise<OracleAggregateReport>;
+  didResolveAccount: (address: string) => Promise<DidResolutionReport>;
+
+  // Track 5: SQLite Analytics, CSV Export, Tray & Auto-Updater
+  analyticsGetSummary: () => Promise<SqliteAnalyticsSummary>;
+  analyticsExportCsv: (kind: 'transactions' | 'ledgers') => Promise<{ ok: boolean; filePath?: string; rowCount?: number; error?: string }>;
+  systemGetTrayUpdaterState: () => Promise<TrayAndUpdaterSettings>;
+  systemUpdateTraySettings: (patch: { minimizeToTray?: boolean; nodeWatchdogEnabled?: boolean }) => Promise<TrayAndUpdaterSettings>;
+  systemCheckForUpdates: () => Promise<TrayAndUpdaterSettings>;
+
+  notifyDesktop: (payload: DesktopNotificationPayload) => Promise<void>;
   onStreamStatus: (cb: (status: StreamStatus) => void) => () => void;
   onLedgerClosed: (cb: (ledger: LedgerSnapshot) => void) => () => void;
   onTransaction: (cb: (tx: LiveTransaction) => void) => () => void;

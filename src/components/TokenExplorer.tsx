@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { formatCompactNumber, shortenAddress } from '../shared/xrplCodec';
 import { useCommandStore } from '../store/useCommandStore';
+import { DexDepthCanvas } from './DexDepthCanvas';
 
 export const TokenExplorer: React.FC = () => {
   const tokens = useCommandStore((s) => s.tokens);
@@ -342,6 +343,16 @@ export const TokenExplorer: React.FC = () => {
                   </div>
                 )}
               </div>
+
+              {/* Interactive CLOB Depth Wall & AMM Constant-Product Curve Canvas */}
+              <DexDepthCanvas
+                currencyLabel={tokenOnLedgerReport.currency}
+                bids={tokenOnLedgerReport.bids}
+                asks={tokenOnLedgerReport.asks}
+                ammReserveXrp={tokenOnLedgerReport.amm?.asset1Numeric ?? 50_000}
+                ammReserveToken={tokenOnLedgerReport.amm?.asset2Numeric ?? 100_000}
+                ammFeeBps={tokenOnLedgerReport.amm?.tradingFeeBps ?? 30}
+              />
 
               {/* Live DEX Orderbook Depth (vs XRP) */}
               <div>

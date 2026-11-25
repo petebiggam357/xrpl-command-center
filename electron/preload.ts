@@ -1,7 +1,9 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type {
+  AssetSpec,
   ConsensusPhase,
   DesktopNotificationPayload,
+  DockerProvisionRequest,
   LedgerSnapshot,
   LiveTransaction,
   NetworkId,
@@ -24,7 +26,7 @@ function subscribeChannel<T>(channel: string, cb: (payload: T) => void): () => v
 const api: XrplDesktopApi = {
   isElectron: true,
   platform: process.platform,
-  version: '0.0.1-alpha',
+  version: '0.0.2-alpha',
   connectNetwork: (networkId: NetworkId, customEndpoint?: string) =>
     ipcRenderer.invoke('xrpl:connect', networkId, customEndpoint),
   getStreamStatus: () => ipcRenderer.invoke('xrpl:getStatus'),
@@ -35,6 +37,8 @@ const api: XrplDesktopApi = {
   inspectTokenOnLedger: (currencyRaw: string, issuer: string) =>
     ipcRenderer.invoke('xrpl:inspectToken', currencyRaw, issuer),
   inspectQuery: (query: string) => ipcRenderer.invoke('xrpl:inspectQuery', query),
+
+  // Node Ops + Docker & Config Diff Studio
   nodeOpsPoll: (config: NodeConnectionConfig) => ipcRenderer.invoke('nodeOps:poll', config),
   nodeOpsAdminCommand: (
     config: NodeConnectionConfig,
@@ -43,9 +47,19 @@ const api: XrplDesktopApi = {
   ) => ipcRenderer.invoke('nodeOps:adminCommand', config, method, params),
   nodeOpsReadLogTail: (filePath: string, maxLines?: number) =>
     ipcRenderer.invoke('nodeOps:readLogTail', filePath, maxLines),
-  notifyDesktop: (payload: DesktopNotificationPayload) => ipcRenderer.invoke('desktop:notify', payload),
+  dockerGetStatus: () => ipcRenderer.invoke('docker:getStatus'),
+  dockerProvisionNode: (req: DockerProvisionRequest) => ipcRenderer.invoke('docker:provision', req),
+  dockerLifecycleAction: (action: 'start' | 'stop' | 'restart' | 'remove') =>
+    ipcRenderer.invoke('docker:lifecycle', action),
+  dockerReadLogs: (tailLines?: number) => ipcRenderer.invoke('docker:readLogs', tailLines),
+  nodeConfigLoad: (customDir?: string) => ipcRenderer.invoke('nodeConfig:load', customDir),
+  nodeConfigSaveWithBackup: (payload: {
+    configDir?: string;
+    rippledCfg: string;
+    validatorsTxt: string;
+  }) => ipcRenderer.invoke('nodeConfig:saveWithBackup', payload),
 
-  // Wallet Vault & DeFi IPC
+  // Wallet Vault, Hardware/QR, Multi-Sig & Pro DEX Pathfinding
   walletGetStatus: () => ipcRenderer.invoke('wallet:getStatus'),
   walletSetupVault: (passphrase: string) => ipcRenderer.invoke('wallet:setup', passphrase),
   walletUnlockVault: (passphrase: string) => ipcRenderer.invoke('wallet:unlock', passphrase),
@@ -54,8 +68,12 @@ const api: XrplDesktopApi = {
     ipcRenderer.invoke('wallet:create', label, algorithm),
   walletImportSeed: (label: string, seed: string) =>
     ipcRenderer.invoke('wallet:importSeed', label, seed),
-  walletAddWatchOnly: (label: string, address: string) =>
-    ipcRenderer.invoke('wallet:addWatchOnly', label, address),
+  walletAddWatchOnly: (
+    label: string,
+    address: string,
+    isHardwareLedger?: boolean,
+    derivationPath?: string
+  ) => ipcRenderer.invoke('wallet:addWatchOnly', label, address, isHardwareLedger, derivationPath),
   walletRemoveAccount: (walletId: string) => ipcRenderer.invoke('wallet:removeAccount', walletId),
   walletFetchPortfolio: (address: string) => ipcRenderer.invoke('wallet:fetchPortfolio', address),
   walletFundFaucet: (address: string, networkId: NetworkId) =>
@@ -63,7 +81,37 @@ const api: XrplDesktopApi = {
   walletPreflightTx: (intent: WalletTxIntent) => ipcRenderer.invoke('wallet:preflightTx', intent),
   walletSignAndSubmitTx: (walletId: string, intent: WalletTxIntent) =>
     ipcRenderer.invoke('wallet:signAndSubmitTx', walletId, intent),
+  walletSubmitSignedBlob: (txBlobHex: string) =>
+    ipcRenderer.invoke('wallet:submitSignedBlob', txBlobHex),
+  walletSignMultisigPartial: (walletId: string, txJson: Record<string, unknown>) =>
+    ipcRenderer.invoke('wallet:signMultisigPartial', walletId, txJson),
+  walletCombineAndSubmitMultisig: (partialBlobs: string[]) =>
+    ipcRenderer.invoke('wallet:combineAndSubmitMultisig', partialBlobs),
+  dexFindBestPath: (params: {
+    sourceAccount: string;
+    destinationAccount: string;
+    destinationAsset: AssetSpec;
+    slippagePct: number;
+  }) => ipcRenderer.invoke('dex:findBestPath', params),
 
+  // Institutional Primitives
+  oracleQueryAggregate: (params: {
+    baseAsset: string;
+    quoteAsset: string;
+    oracles: Array<{ account: string; oracleDocumentId: number }>;
+  }) => ipcRenderer.invoke('oracle:queryAggregate', params),
+  didResolveAccount: (address: string) => ipcRenderer.invoke('did:resolveAccount', address),
+
+  // SQLite Analytics, CSV Export, Tray & Auto-Updater
+  analyticsGetSummary: () => ipcRenderer.invoke('analytics:getSummary'),
+  analyticsExportCsv: (kind: 'transactions' | 'ledgers') =>
+    ipcRenderer.invoke('analytics:exportCsv', kind),
+  systemGetTrayUpdaterState: () => ipcRenderer.invoke('system:getTrayUpdaterState'),
+  systemUpdateTraySettings: (patch: { minimizeToTray?: boolean; nodeWatchdogEnabled?: boolean }) =>
+    ipcRenderer.invoke('system:updateTraySettings', patch),
+  systemCheckForUpdates: () => ipcRenderer.invoke('system:checkForUpdates'),
+
+  notifyDesktop: (payload: DesktopNotificationPayload) => ipcRenderer.invoke('desktop:notify', payload),
   onStreamStatus: (cb: (status: StreamStatus) => void) => subscribeChannel('xrpl:status', cb),
   onLedgerClosed: (cb: (ledger: LedgerSnapshot) => void) => subscribeChannel('xrpl:ledger', cb),
   onTransaction: (cb: (tx: LiveTransaction) => void) => subscribeChannel('xrpl:tx', cb),

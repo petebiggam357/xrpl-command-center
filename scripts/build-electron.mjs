@@ -11,7 +11,7 @@ const shared = {
   target: 'node20',
   format: 'cjs',
   sourcemap: false,
-  external: ['electron', 'ws', 'bufferutil', 'utf-8-validate'],
+  external: ['electron', 'ws', 'sql.js', 'electron-updater', 'bufferutil', 'utf-8-validate'],
 };
 
 await Promise.all([

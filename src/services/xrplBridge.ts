@@ -2,16 +2,23 @@ import { NETWORK_PRESETS } from '../shared/networks';
 import type {
   ConsensusPhase,
   DesktopNotificationPayload,
+  DidResolutionReport,
+  DockerNodeStatus,
   InspectorResult,
   LedgerSnapshot,
   LiveTransaction,
   NetworkId,
+  NodeConfigBundle,
   NodeConnectionConfig,
   NodeOpsSnapshot,
+  OracleAggregateReport,
+  PathFindQuote,
+  SqliteAnalyticsSummary,
   StreamStatus,
   TokenOnLedgerReport,
   TokenRecord,
   TopologyNode,
+  TrayAndUpdaterSettings,
   TxPreflightPreview,
   TxSubmitResult,
   ValidationPulse,
@@ -206,30 +213,6 @@ class BrowserFallbackBridge {
     };
   }
 
-  public async nodeOpsPoll(config: NodeConnectionConfig): Promise<NodeOpsSnapshot> {
-    return {
-      connected: false,
-      endpoint: config.rpcUrl,
-      checkedAt: Date.now(),
-      error: 'Direct local rippled Admin RPC requires running the desktop Electron build.',
-      peers: [],
-      amendments: [],
-      adminAvailable: false,
-    };
-  }
-
-  public async nodeOpsAdminCommand(): Promise<{ ok: boolean; error?: string }> {
-    return { ok: false, error: 'Admin RPC commands require the desktop Electron app.' };
-  }
-
-  public async nodeOpsReadLogTail(): Promise<{ ok: boolean; lines: string[]; error?: string }> {
-    return { ok: false, lines: [], error: 'Local log tailing requires the desktop Electron app.' };
-  }
-
-  public async notifyDesktop(_payload: DesktopNotificationPayload): Promise<void> {
-    // no-op in browser fallback
-  }
-
   public async walletGetStatus(): Promise<VaultStatus> {
     return {
       initialized: false,
@@ -239,12 +222,18 @@ class BrowserFallbackBridge {
     };
   }
 
-  public async walletAddWatchOnly(label: string, address: string) {
+  public async walletAddWatchOnly(
+    label: string,
+    address: string,
+    isHardwareLedger?: boolean,
+    derivationPath?: string
+  ) {
     const acct: WalletAccountPublic = {
       id: `watch-${Date.now()}`,
       label: label || address.slice(0, 8),
       address: address.trim(),
-      kind: 'watch-only',
+      kind: isHardwareLedger ? 'hardware-ledger' : 'watch-only',
+      derivationPath,
       createdAt: Date.now(),
     };
     this.watchAccounts = [acct, ...this.watchAccounts];
@@ -342,12 +331,12 @@ export function getXrplBridge(): Omit<XrplDesktopApi, 'isElectron' | 'platform' 
   const fb = fallbackInstance;
   const desktopOnlyErr = async () => ({
     ok: false,
-    error: 'Encrypted Wallet Vault & signing require the desktop Electron app (.AppImage / .exe / .dmg).',
+    error: 'This capability requires the desktop Electron app (.AppImage / .exe / .dmg).',
   });
   return {
     isElectron: false,
     platform: 'web-preview',
-    version: '0.0.1-alpha',
+    version: '0.0.2-alpha',
     connectNetwork: (n, c) => fb.connectNetwork(n, c),
     getStreamStatus: () => fb.getStreamStatus(),
     rpcRequest: (cmd, params) => fb.rpcRequest(cmd, params),
@@ -355,10 +344,39 @@ export function getXrplBridge(): Omit<XrplDesktopApi, 'isElectron' | 'platform' 
     fetchTokens: () => fb.fetchTokens(),
     inspectTokenOnLedger: (c, i) => fb.inspectTokenOnLedger(c, i),
     inspectQuery: (q) => fb.inspectQuery(q),
-    nodeOpsPoll: (cfg) => fb.nodeOpsPoll(cfg),
-    nodeOpsAdminCommand: () => fb.nodeOpsAdminCommand(),
-    nodeOpsReadLogTail: () => fb.nodeOpsReadLogTail(),
-    notifyDesktop: (p) => fb.notifyDesktop(p),
+
+    nodeOpsPoll: async (cfg: NodeConnectionConfig): Promise<NodeOpsSnapshot> => ({
+      connected: false,
+      endpoint: cfg.rpcUrl,
+      checkedAt: Date.now(),
+      error: 'Desktop Electron mode required.',
+      peers: [],
+      amendments: [],
+      adminAvailable: false,
+    }),
+    nodeOpsAdminCommand: desktopOnlyErr,
+    nodeOpsReadLogTail: async () => ({ ok: false, lines: [], error: 'Desktop Electron mode required.' }),
+    dockerGetStatus: async (): Promise<DockerNodeStatus> => ({
+      dockerInstalled: false,
+      daemonRunning: false,
+      containerExists: false,
+      containerRunning: false,
+      containerName: 'xrpl-command-node',
+      configDir: '',
+      error: 'Desktop Electron mode required.',
+    }),
+    dockerProvisionNode: desktopOnlyErr,
+    dockerLifecycleAction: desktopOnlyErr,
+    dockerReadLogs: async () => ({ ok: false, lines: [], error: 'Desktop Electron mode required.' }),
+    nodeConfigLoad: async (): Promise<NodeConfigBundle> => ({
+      configDir: '',
+      rippledCfgPath: '',
+      validatorsTxtPath: '',
+      rippledCfg: '',
+      validatorsTxt: '',
+      existsOnDisk: false,
+    }),
+    nodeConfigSaveWithBackup: desktopOnlyErr,
 
     walletGetStatus: () => fb.walletGetStatus(),
     walletSetupVault: desktopOnlyErr,
@@ -366,7 +384,7 @@ export function getXrplBridge(): Omit<XrplDesktopApi, 'isElectron' | 'platform' 
     walletLockVault: () => fb.walletGetStatus(),
     walletCreate: desktopOnlyErr,
     walletImportSeed: desktopOnlyErr,
-    walletAddWatchOnly: (l, a) => fb.walletAddWatchOnly(l, a),
+    walletAddWatchOnly: (l, a, hw, p) => fb.walletAddWatchOnly(l, a, hw, p),
     walletRemoveAccount: (id) => fb.walletRemoveAccount(id),
     walletFetchPortfolio: (a) => fb.walletFetchPortfolio(a),
     walletFundFaucet: desktopOnlyErr,
@@ -379,13 +397,70 @@ export function getXrplBridge(): Omit<XrplDesktopApi, 'isElectron' | 'platform' 
       feeXrp: '0.000012',
       summaryLines: [],
       warnings: [],
-      blockingError: 'Transaction signing requires the desktop Electron app.',
+      blockingError: 'Desktop Electron mode required.',
     }),
     walletSignAndSubmitTx: async (): Promise<TxSubmitResult> => ({
       ok: false,
-      error: 'Transaction signing requires the desktop Electron app.',
+      error: 'Desktop Electron mode required.',
+    }),
+    walletSubmitSignedBlob: desktopOnlyErr,
+    walletSignMultisigPartial: desktopOnlyErr,
+    walletCombineAndSubmitMultisig: desktopOnlyErr,
+    dexFindBestPath: async (p): Promise<PathFindQuote> => ({
+      ok: false,
+      sourceAmountDisplay: '—',
+      sendMaxSpec: p.destinationAsset,
+      deliverMinSpec: p.destinationAsset,
+      destinationAmountSpec: p.destinationAsset,
+      hopsSummary: '',
+      error: 'Desktop Electron mode required.',
     }),
 
+    oracleQueryAggregate: async (p): Promise<OracleAggregateReport> => ({
+      ok: false,
+      baseAsset: p.baseAsset,
+      quoteAsset: p.quoteAsset,
+      error: 'Desktop Electron mode required.',
+    }),
+    didResolveAccount: async (address): Promise<DidResolutionReport> => ({
+      ok: false,
+      did: `did:xrpl:1:${address}`,
+      address,
+      error: 'Desktop Electron mode required.',
+    }),
+
+    analyticsGetSummary: async (): Promise<SqliteAnalyticsSummary> => ({
+      dbPath: '',
+      dbSizeBytes: 0,
+      recordedLedgers: 0,
+      recordedTxJournal: 0,
+      avgTpsRecent: 0,
+      avgFeeDropsRecent: 10,
+      peakTxnLedger: null,
+      recentJournal: [],
+      ledgerSeries: [],
+    }),
+    analyticsExportCsv: desktopOnlyErr,
+    systemGetTrayUpdaterState: async (): Promise<TrayAndUpdaterSettings> => ({
+      minimizeToTray: false,
+      nodeWatchdogEnabled: false,
+      currentVersion: '0.0.2-alpha',
+      updateState: 'idle',
+    }),
+    systemUpdateTraySettings: async () => ({
+      minimizeToTray: false,
+      nodeWatchdogEnabled: false,
+      currentVersion: '0.0.2-alpha',
+      updateState: 'idle',
+    }),
+    systemCheckForUpdates: async () => ({
+      minimizeToTray: false,
+      nodeWatchdogEnabled: false,
+      currentVersion: '0.0.2-alpha',
+      updateState: 'idle',
+    }),
+
+    notifyDesktop: (_p: DesktopNotificationPayload) => Promise.resolve(),
     onStreamStatus: (cb) => fb.onStreamStatus(cb),
     onLedgerClosed: (cb) => fb.onLedgerClosed(cb),
     onTransaction: (cb) => fb.onTransaction(cb),

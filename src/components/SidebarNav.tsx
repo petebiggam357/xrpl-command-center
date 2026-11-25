@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import {
   Bell,
+  Building2,
   Coins,
+  Database,
   Globe2,
   Plus,
   Radar,
@@ -22,9 +24,11 @@ const NAV_ITEMS: Array<{
   { id: 'command', label: 'Command Deck', subtitle: 'Live Pulse & Stream', icon: Radar },
   { id: 'globe', label: '3D Globe', subtitle: 'Holographic Consensus', icon: Globe2 },
   { id: 'validators', label: 'Validators', subtitle: 'UNL & Quorum Health', icon: ShieldCheck },
-  { id: 'tokens', label: 'Tokens & DEX', subtitle: 'IOUs, MPTs & AMM Pools', icon: Coins },
-  { id: 'wallets', label: 'Wallets & DeFi', subtitle: 'Vault, DEX, AMM & NFTs', icon: Wallet },
-  { id: 'nodeops', label: 'My Node Ops', subtitle: 'rippled / Clio Admin', icon: Server },
+  { id: 'tokens', label: 'Tokens & DEX', subtitle: 'IOUs, Depth & AMM Curve', icon: Coins },
+  { id: 'wallets', label: 'Wallets & DeFi', subtitle: 'Vault, Ledger, PathSwap', icon: Wallet },
+  { id: 'primitives', label: 'Institutional', subtitle: 'MPT, Oracles, DID & TOML', icon: Building2 },
+  { id: 'nodeops', label: 'My Node Ops', subtitle: 'Docker, Config & Admin', icon: Server },
+  { id: 'analytics', label: 'Analytics & Tray', subtitle: 'SQLite, CSV & Updater', icon: Database },
 ];
 
 export const SidebarNav: React.FC = () => {

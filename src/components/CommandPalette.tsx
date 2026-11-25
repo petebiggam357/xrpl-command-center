@@ -26,9 +26,11 @@ export const CommandPalette: React.FC = () => {
     { tab: 'command', label: 'Command Deck', hint: 'Live Consensus Core & Particle River' },
     { tab: 'globe', label: '3D Validator Globe', hint: 'Interactive WebGL2 Holographic Globe' },
     { tab: 'validators', label: 'Validators & UNL', hint: 'Agreement Scores & Live Votes' },
-    { tab: 'tokens', label: 'Tokens, DEX & AMM', hint: 'All Issued Currencies & Risk Flags' },
-    { tab: 'wallets', label: 'Wallets & DeFi Studio', hint: 'Encrypted Vault, Payments, DEX, AMM & NFTs' },
-    { tab: 'nodeops', label: 'My Node Ops Console', hint: 'Manage Your Own rippled / Clio Node' },
+    { tab: 'tokens', label: 'Tokens, DEX & AMM', hint: 'CLOB Depth Wall & AMM x*y=k Curve' },
+    { tab: 'wallets', label: 'Wallets & Pro DeFi Studio', hint: 'Vault, Ledger USB, Multi-Sig & PathSwap' },
+    { tab: 'primitives', label: 'Institutional Primitives', hint: 'MPT, XLS-47 Oracles, DID & xrp-ledger.toml' },
+    { tab: 'nodeops', label: 'My Node Ops & Docker', hint: '1-Click Docker Node & rippled.cfg Diff Studio' },
+    { tab: 'analytics', label: 'SQLite Analytics & System', hint: 'CSV Accounting Export, Tray Watchdog & Updater' },
   ];
 
   return (

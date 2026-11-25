@@ -23,7 +23,15 @@ import type {
 } from '../shared/types';
 import { getXrplBridge } from '../services/xrplBridge';
 
-export type NavTab = 'command' | 'globe' | 'validators' | 'tokens' | 'wallets' | 'nodeops';
+export type NavTab =
+  | 'command'
+  | 'globe'
+  | 'validators'
+  | 'tokens'
+  | 'wallets'
+  | 'primitives'
+  | 'nodeops'
+  | 'analytics';
 
 const MAX_LEDGERS = 36;
 const MAX_TX_FEED = 180;
