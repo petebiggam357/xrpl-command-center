@@ -520,14 +520,22 @@ export const WalletDeck: React.FC = () => {
                       ? 'VAULT LOCKED'
                       : 'VAULT UNINITIALIZED'}
                 </span>
-                {vaultStatus.osKeychainAvailable && (
-                  <span className="px-2 py-0.5 rounded bg-cyan-500/10 border border-cyan-400/30 text-[10px] font-mono text-cyan-300">
-                    OS Keyring Active
+                {vaultStatus.backend === 'rust-sidecar' ? (
+                  <span className="px-2 py-0.5 rounded bg-emerald-500/15 border border-emerald-400/40 text-[10px] font-mono text-emerald-200">
+                    RUST SIDECAR • Argon2id + Zeroize {vaultStatus.sidecarPid ? `(PID ${vaultStatus.sidecarPid})` : ''}
                   </span>
+                ) : (
+                  vaultStatus.osKeychainAvailable && (
+                    <span className="px-2 py-0.5 rounded bg-cyan-500/10 border border-cyan-400/30 text-[10px] font-mono text-cyan-300">
+                      OS Keyring Active
+                    </span>
+                  )
                 )}
               </div>
               <p className="text-[11px] text-slate-400">
-                `scrypt` + `AES-256-GCM` local vault, Ledger USB WebHID, Air-Gapped QR, Multi-Sig &amp; Smart Pathfinding
+                {vaultStatus.backend === 'rust-sidecar'
+                  ? 'Process-isolated Rust vault (Argon2id + AES-256-GCM + deterministic RAM zeroing), Ledger USB, Air-Gapped QR & Multi-Sig'
+                  : 'Encrypted local vault, Ledger USB WebHID, Air-Gapped QR, Multi-Sig & Smart Pathfinding'}
               </p>
             </div>
           </div>

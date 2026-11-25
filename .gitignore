@@ -5,6 +5,8 @@ node_modules/
 dist/
 dist-electron/
 release/
+rust-vault/target/
+build/bin/
 
 # Logs & local state
 *.log

@@ -27,15 +27,17 @@ import { AnalyticsSqliteService } from './analyticsService';
 import { DirectoryService } from './directoryService';
 import { DockerNodeService } from './dockerNodeService';
 import { NodeOpsService } from './nodeOpsService';
+import { resolveRustSidecarBinaryPath, RustVaultSidecarClient } from './rustVaultClient';
 import { WalletVaultService } from './walletVaultService';
 import { XrplStreamManager } from './xrplStream';
 
-const APP_VERSION = '0.0.2-alpha';
+const APP_VERSION = '0.0.3-alpha';
 const LEDGER_USB_VENDOR_ID = 0x2c97;
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let isQuitting = false;
+let rustSidecar: RustVaultSidecarClient | null = null;
 let watchdogTimer: NodeJS.Timeout | null = null;
 let lastMonitoredNodeConfig: NodeConnectionConfig = {
   label: 'Local rippled Admin Node',
@@ -236,12 +238,24 @@ function createWindow(): void {
     },
   });
 
+  // Hardened Electron session: deny unneeded browser permissions (WebHID is handled by setDevicePermissionHandler)
+  mainWindow.webContents.session.setPermissionRequestHandler((_wc, _permission, callback) => {
+    callback(false);
+  });
+
   // Enable Chromium WebHID device selection exclusively for Ledger hardware wallets (0x2c97)
   mainWindow.webContents.session.setDevicePermissionHandler((details) => {
     if (details.deviceType === 'hid' && details.device?.vendorId === LEDGER_USB_VENDOR_ID) {
       return true;
     }
     return false;
+  });
+
+  // Prevent unexpected top-level navigation outside our local renderer origin
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (!url.startsWith('file://') && !url.startsWith('http://127.0.0.1:5173') && !url.startsWith('http://localhost:5173')) {
+      event.preventDefault();
+    }
   });
 
   mainWindow.webContents.session.on('select-hid-device', (event, details, callback) => {
@@ -496,12 +510,21 @@ function registerIpcHandlers(): void {
 
 app.whenReady().then(() => {
   const userDataDir = app.getPath('userData');
+  const sidecarBin = resolveRustSidecarBinaryPath(app.isPackaged, process.resourcesPath);
+  if (sidecarBin) {
+    rustSidecar = new RustVaultSidecarClient(sidecarBin, userDataDir);
+    rustSidecar.start();
+  }
 
-  walletVault = new WalletVaultService(userDataDir, {
-    isAvailable: () => safeStorage.isEncryptionAvailable(),
-    encrypt: (plain) => safeStorage.encryptString(plain),
-    decrypt: (buf) => safeStorage.decryptString(buf),
-  });
+  walletVault = new WalletVaultService(
+    userDataDir,
+    {
+      isAvailable: () => safeStorage.isEncryptionAvailable(),
+      encrypt: (plain) => safeStorage.encryptString(plain),
+      decrypt: (buf) => safeStorage.decryptString(buf),
+    },
+    rustSidecar
+  );
   dockerService = new DockerNodeService(userDataDir);
   analyticsService = new AnalyticsSqliteService(userDataDir);
   void analyticsService.init();
@@ -525,6 +548,7 @@ app.on('before-quit', () => {
   isQuitting = true;
   if (watchdogTimer) clearInterval(watchdogTimer);
   walletVault?.lock();
+  rustSidecar?.shutdown();
   void analyticsService?.close();
   streamManager.destroy();
 });

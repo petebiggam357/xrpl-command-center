@@ -58,7 +58,7 @@ export const TopHudBar: React.FC = () => {
                 XRPL Command Center
               </span>
               <span className="px-1.5 py-0.5 rounded bg-cyan-500/15 border border-cyan-400/30 font-mono text-[10px] text-cyan-300">
-                v0.0.2-alpha
+                v0.0.3-alpha
               </span>
             </div>
             <div className="text-[10px] font-mono text-slate-400 truncate max-w-[230px]">

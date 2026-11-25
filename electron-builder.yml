@@ -11,6 +11,8 @@ files:
 extraResources:
   - from: build/icon.png
     to: icon.png
+  - from: build/bin
+    to: bin
 asar: true
 asarUnpack:
   - node_modules/sql.js/dist/*.wasm

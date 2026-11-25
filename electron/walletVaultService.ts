@@ -6,11 +6,13 @@ import {
   decode,
   ECDSA,
   encode,
+  encodeForMultiSigning,
   encodeForSigning,
   isValidClassicAddress,
   multisign,
   Wallet,
 } from 'xrpl';
+import type { RustVaultSidecarClient } from './rustVaultClient';
 import type {
   AssetSpec,
   LiveTransaction,
@@ -750,7 +752,8 @@ export class WalletVaultService {
 
   constructor(
     private readonly storageDir: string,
-    private readonly osCipher?: OsCipherAdapter
+    private readonly osCipher?: OsCipherAdapter,
+    private readonly rustSidecar?: RustVaultSidecarClient | null
   ) {}
 
   private get vaultPath(): string {
@@ -896,16 +899,30 @@ export class WalletVaultService {
   }
 
   public async getStatus(): Promise<VaultStatus> {
+    if (this.rustSidecar) {
+      return this.rustSidecar.getStatus();
+    }
     const disk = await this.loadDiskFile();
     return {
       initialized: disk.vaultInitialized,
       unlocked: this.unlockedSeeds !== null,
       osKeychainAvailable: this.isOsKeychainAvailable(),
+      backend: 'node-fallback',
+      kdf: 'scrypt+aes-256-gcm',
       accounts: disk.accounts,
     };
   }
 
   public async setupVault(passphrase: string): Promise<{ ok: boolean; status?: VaultStatus; error?: string }> {
+    if (this.rustSidecar) {
+      try {
+        const status = await this.rustSidecar.setupVault(passphrase);
+        this.touchAutoLock();
+        return { ok: true, status };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : 'Rust vault setup failed' };
+      }
+    }
     if (!passphrase || passphrase.length < 8) {
       return { ok: false, error: 'Master passphrase must be at least 8 characters.' };
     }
@@ -935,6 +952,15 @@ export class WalletVaultService {
   }
 
   public async unlock(passphrase: string): Promise<{ ok: boolean; status?: VaultStatus; error?: string }> {
+    if (this.rustSidecar) {
+      try {
+        const status = await this.rustSidecar.unlock(passphrase);
+        this.touchAutoLock();
+        return { ok: true, status };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : 'Failed to unlock Rust vault' };
+      }
+    }
     try {
       const disk = await this.loadDiskFile();
       const { key, salt, seeds } = this.decryptSeeds(disk, passphrase);
@@ -952,6 +978,9 @@ export class WalletVaultService {
     if (this.autoLockTimer) {
       clearTimeout(this.autoLockTimer);
       this.autoLockTimer = null;
+    }
+    if (this.rustSidecar && this.rustSidecar.isRunning()) {
+      void this.rustSidecar.lock().catch(() => undefined);
     }
     if (this.unlockedSeeds) {
       this.unlockedSeeds.clear();
@@ -987,6 +1016,15 @@ export class WalletVaultService {
     status?: VaultStatus;
     error?: string;
   }> {
+    if (this.rustSidecar) {
+      try {
+        this.touchAutoLock();
+        const created = await this.rustSidecar.createWallet(label, algorithm);
+        return { ok: true, ...created };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : 'Rust wallet creation failed' };
+      }
+    }
     if (!this.unlockedSeeds) {
       return { ok: false, error: 'Unlock or initialize your encrypted vault before creating a signing wallet.' };
     }
@@ -1025,15 +1063,25 @@ export class WalletVaultService {
     label: string,
     seedInput: string
   ): Promise<{ ok: boolean; account?: WalletAccountPublic; status?: VaultStatus; error?: string }> {
+    if (this.rustSidecar) {
+      try {
+        this.touchAutoLock();
+        const res = await this.rustSidecar.importSeed(label, seedInput);
+        return { ok: true, ...res };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : 'Rust seed import failed' };
+      }
+    }
     if (!this.unlockedSeeds) {
       return { ok: false, error: 'Unlock your encrypted vault before importing a seed.' };
     }
     this.touchAutoLock();
 
     const cleanSeed = seedInput.trim();
+    const detectedAlgo = cleanSeed.startsWith('sEd') ? ECDSA.ed25519 : ECDSA.secp256k1;
     let wallet: Wallet;
     try {
-      wallet = Wallet.fromSeed(cleanSeed);
+      wallet = Wallet.fromSeed(cleanSeed, { algorithm: detectedAlgo });
     } catch {
       return { ok: false, error: 'Invalid XRPL family seed (expected sEd… or s… format).' };
     }
@@ -1072,6 +1120,14 @@ export class WalletVaultService {
     if (!isValidClassicAddress(addr)) {
       return { ok: false, error: 'Invalid XRPL classic r-address.' };
     }
+    if (this.rustSidecar) {
+      try {
+        const res = await this.rustSidecar.addWatchOnly(label, addr, isHardwareLedger, derivationPath);
+        return { ok: true, ...res };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : 'Unable to add watch account' };
+      }
+    }
 
     const disk = await this.loadDiskFile();
     if (disk.accounts.some((a) => a.address === addr)) {
@@ -1096,6 +1152,9 @@ export class WalletVaultService {
   }
 
   public async removeAccount(walletId: string): Promise<VaultStatus> {
+    if (this.rustSidecar) {
+      return this.rustSidecar.removeAccount(walletId);
+    }
     const disk = await this.loadDiskFile();
     const target = disk.accounts.find((a) => a.id === walletId);
     if (!target) return this.getStatus();
@@ -1724,6 +1783,36 @@ export class WalletVaultService {
     walletId: string,
     intent: WalletTxIntent
   ): Promise<TxSubmitResult> {
+    if (this.rustSidecar) {
+      try {
+        this.touchAutoLock();
+        const { address, publicKeyHex } = await this.rustSidecar.getPublicKey(walletId);
+        if (address !== intent.account) {
+          return { ok: false, error: 'Signing key address mismatch with transaction Account.' };
+        }
+        const preflight = await this.preflightTransaction(stream, intent);
+        if (!preflight.ok || preflight.blockingError) {
+          return {
+            ok: false,
+            error: preflight.blockingError ?? 'Pre-flight transaction safety check failed.',
+          };
+        }
+        const txWithPub = { ...preflight.txJson, SigningPubKey: publicKeyHex };
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const signingHex = encodeForSigning(txWithPub as any);
+        const { signatureHex } = await this.rustSidecar.signPayload(walletId, signingHex);
+        const signedTx = { ...txWithPub, TxnSignature: signatureHex };
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const txBlob = encode(signedTx as any);
+        return this.broadcastAndConfirmBlob(stream, txBlob);
+      } catch (err) {
+        return {
+          ok: false,
+          error: err instanceof Error ? err.message : 'Rust vault signing failed',
+        };
+      }
+    }
+
     if (!this.unlockedSeeds) {
       return { ok: false, error: 'Vault is locked. Unlock your vault before signing transactions.' };
     }
@@ -1784,6 +1873,37 @@ export class WalletVaultService {
     walletId: string,
     txJsonInput: Record<string, unknown>
   ): Promise<{ ok: boolean; txBlob?: string; signerAddress?: string; error?: string }> {
+    if (this.rustSidecar) {
+      try {
+        this.touchAutoLock();
+        const { address, publicKeyHex } = await this.rustSidecar.getPublicKey(walletId);
+        const txCopy = { ...txJsonInput, SigningPubKey: '' };
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const signingHex = encodeForMultiSigning(txCopy as any, address);
+        const { signatureHex } = await this.rustSidecar.signPayload(walletId, signingHex);
+        const partialSigned = {
+          ...txCopy,
+          Signers: [
+            {
+              Signer: {
+                Account: address,
+                SigningPubKey: publicKeyHex,
+                TxnSignature: signatureHex,
+              },
+            },
+          ],
+        };
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const txBlob = encode(partialSigned as any);
+        return { ok: true, txBlob, signerAddress: address };
+      } catch (err) {
+        return {
+          ok: false,
+          error: err instanceof Error ? err.message : 'Rust multi-sig signing failed',
+        };
+      }
+    }
+
     if (!this.unlockedSeeds) {
       return { ok: false, error: 'Unlock your vault before producing a multi-signature.' };
     }

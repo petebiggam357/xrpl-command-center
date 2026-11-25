@@ -336,7 +336,7 @@ export function getXrplBridge(): Omit<XrplDesktopApi, 'isElectron' | 'platform' 
   return {
     isElectron: false,
     platform: 'web-preview',
-    version: '0.0.2-alpha',
+    version: '0.0.3-alpha',
     connectNetwork: (n, c) => fb.connectNetwork(n, c),
     getStreamStatus: () => fb.getStreamStatus(),
     rpcRequest: (cmd, params) => fb.rpcRequest(cmd, params),

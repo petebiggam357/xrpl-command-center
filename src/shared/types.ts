@@ -315,6 +315,9 @@ export interface VaultStatus {
   initialized: boolean;
   unlocked: boolean;
   osKeychainAvailable: boolean;
+  backend?: 'rust-sidecar' | 'node-fallback';
+  kdf?: string;
+  sidecarPid?: number;
   accounts: WalletAccountPublic[];
 }
 

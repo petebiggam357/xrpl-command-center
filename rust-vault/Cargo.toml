@@ -1,0 +1,33 @@
+[package]
+name = "xrpl-vault-sidecar"
+version = "0.0.3-alpha"
+edition = "2021"
+description = "Process-isolated Rust cryptographic vault and XRPL transaction signer (Argon2id + AES-256-GCM + Zeroize)"
+license = "MIT"
+
+[[bin]]
+name = "xrpl-vault-sidecar"
+path = "src/main.rs"
+
+[dependencies]
+aes-gcm = "0.10.3"
+argon2 = "0.5.3"
+base64 = "=0.22.1"
+base64ct = "=1.6.0"
+bs58 = { version = "=0.5.1", features = ["check"] }
+ed25519-dalek = { version = "=2.1.1", features = ["rand_core"] }
+hex = "=0.4.3"
+k256 = { version = "=0.13.4", features = ["ecdsa", "arithmetic"] }
+rand_core = { version = "=0.6.4", features = ["getrandom"] }
+ripemd = "=0.1.3"
+serde = { version = "=1.0.215", features = ["derive"] }
+serde_json = "=1.0.133"
+sha2 = "=0.10.8"
+zeroize = { version = "=1.8.1", features = ["derive"] }
+zeroize_derive = "=1.4.2"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true

@@ -26,7 +26,7 @@ function subscribeChannel<T>(channel: string, cb: (payload: T) => void): () => v
 const api: XrplDesktopApi = {
   isElectron: true,
   platform: process.platform,
-  version: '0.0.2-alpha',
+  version: '0.0.3-alpha',
   connectNetwork: (networkId: NetworkId, customEndpoint?: string) =>
     ipcRenderer.invoke('xrpl:connect', networkId, customEndpoint),
   getStreamStatus: () => ipcRenderer.invoke('xrpl:getStatus'),
