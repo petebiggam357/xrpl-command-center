@@ -6,7 +6,7 @@
 
 **Real-Time Cross-Platform XRP Ledger Telemetry, 3D Consensus Globe, Encrypted Multi-Wallet & Pro DeFi Studio, Institutional Primitives (`MPT`/`Oracle`/`DID`), 1-Click Docker Node Manager & SQLite Analytics**
 
-[![Version](https://img.shields.io/badge/version-v0.1.2--beta-22d3ee?style=flat-square)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v0.1.3--beta-22d3ee?style=flat-square)](CHANGELOG.md)
 [![Platforms](https://img.shields.io/badge/platforms-AppImage%20%7C%20exe%20%7C%20dmg-34d399?style=flat-square)](#cross-platform-packaging)
 [![Security](https://img.shields.io/badge/vault-Rust%20Argon2id%20%2B%20Ledger%20%2B%20Trezor%20%2B%20Cold%20QR-a78bfa?style=flat-square)](#security--vault-architecture)
 [![License](https://img.shields.io/badge/license-MIT-64748b?style=flat-square)](LICENSE)
@@ -88,18 +88,18 @@ flowchart LR
 
 ## Quick Start
 
-### Option 1: Launch a Packaged Release (`v0.1.2-beta`)
+### Option 1: Launch a Packaged Release (`v0.1.3-beta`)
 
 Download the package for your operating system from the **Releases** page:
 
 - **Linux (`.AppImage`):**
   ```bash
-  chmod +x XRPL-Command-Center-0.1.2-beta-linux-x86_64.AppImage
-  ./XRPL-Command-Center-0.1.2-beta-linux-x86_64.AppImage
+  chmod +x XRPL-Command-Center-0.1.3-beta-linux-x86_64.AppImage
+  ./XRPL-Command-Center-0.1.3-beta-linux-x86_64.AppImage
   ```
   > **Ubuntu / Debian tip:** If AppArmor user-namespace restrictions or missing FUSE2 prevent direct launch, run with `--appimage-extract-and-run --no-sandbox`. On first AppImage launch, the desktop dock icon is automatically registered in `~/.local/share/icons` and `~/.local/share/applications`.
-- **Windows (`.exe`):** Run `XRPL-Command-Center-0.1.2-beta-win-x64-setup.exe` (installer) or `XRPL-Command-Center-0.1.2-beta-win-x64-portable.exe` (standalone portable binary).
-- **macOS (`.dmg`):** Open `XRPL-Command-Center-0.1.2-beta-mac-arm64.dmg` (Apple Silicon) and drag **XRPL Command Center** to Applications.
+- **Windows (`.exe`):** Run `XRPL-Command-Center-0.1.3-beta-win-x64-setup.exe` (installer) or `XRPL-Command-Center-0.1.3-beta-win-x64-portable.exe` (standalone portable binary).
+- **macOS (`.dmg`):** Open `XRPL-Command-Center-0.1.3-beta-mac-arm64.dmg` (Apple Silicon) and drag **XRPL Command Center** to Applications.
 
 ### Option 2: Run From Source (Development)
 
@@ -140,9 +140,9 @@ Open **My Node Ops** in the left navigation rail:
 ## Cross-Platform Packaging
 
 ```bash
-npm run dist:linux   # -> release/XRPL-Command-Center-0.1.2-beta-linux-x86_64.AppImage
-npm run dist:win     # -> release/XRPL-Command-Center-0.1.2-beta-win-x64-{setup,portable}.exe
-npm run dist:mac     # -> release/XRPL-Command-Center-0.1.2-beta-mac-arm64.dmg
+npm run dist:linux   # -> release/XRPL-Command-Center-0.1.3-beta-linux-x86_64.AppImage
+npm run dist:win     # -> release/XRPL-Command-Center-0.1.3-beta-win-x64-{setup,portable}.exe
+npm run dist:mac     # -> release/XRPL-Command-Center-0.1.3-beta-mac-arm64.dmg
 ```
 
 ---

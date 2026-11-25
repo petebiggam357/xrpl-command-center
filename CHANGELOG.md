@@ -2,6 +2,15 @@
 
 All notable changes to **XRPL Command Center** are documented in this file.
 
+## [0.1.3-beta] - 2026-11-25
+
+### Added
+- **XRPL Academy & Deep Education Hub (`XRPL Academy` tab + `Ctrl+K` quick-jump):**
+  - **10 Built-In Deep Lessons** covering XRPL Consensus & 80% UNL Quorum, Accounts/Reserves (`1 XRP + 0.2 XRP/object`), Destination Tags & X-Addresses, TrustLines & Issuer Risk Flags, CLOB DEX + XLS-30 AMM `x·y=k` + Auto-Bridging, Escrows/Checks/XLS-20 NFTs, Rust Argon2id Vault + Hardware Custody, Institutional MPT/Oracles/DIDs/`xrp-ledger.toml`, Self-Hosted `rippled` Nodes on Custom Drives, and a Complete Command Center Tour—with persisted completion progress, search/category filters, and 1-click **"Try It Live"** links to matching app tabs.
+  - **Interactive Reserve & Fee Lab:** Live sliders simulating Total XRP, TrustLines, DEX Orders, NFT Pages, and Escrows/Checks with real-time locked vs. spendable XRP & USD calculation.
+  - **20-Term Searchable XRPL Glossary** and **12 Curated Official External Docs & Explorer Links** (`xrpl.org/docs`, `learn.xrpl.org`, `XRPLF/rippled`, `XRPL-Standards`, `XRPScan`, `Bithomp`, `livenet.xrpl.org`, and official faucets).
+  - Lazy-loaded (`13.9 KB` gzipped) for zero cold-boot impact; verified by `tests/education.test.ts` (29/29 total Vitest tests passing).
+
 ## [0.1.2-beta] - 2026-11-25
 
 ### Added & Improved
