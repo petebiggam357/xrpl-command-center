@@ -19,7 +19,12 @@ asarUnpack:
 compression: normal
 linux:
   category: Network;Development;Utility
-  icon: build/icon.png
+  icon: build/icons
+  desktop:
+    Name: XRPL Command Center
+    Comment: Real-Time XRP Ledger Command Center, Rust Vault & Node Ops
+    StartupWMClass: xrpl-command-center
+    Icon: xrpl-command-center
   target:
     - target: AppImage
       arch:

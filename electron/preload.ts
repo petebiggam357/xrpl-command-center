@@ -26,7 +26,7 @@ function subscribeChannel<T>(channel: string, cb: (payload: T) => void): () => v
 const api: XrplDesktopApi = {
   isElectron: true,
   platform: process.platform,
-  version: '0.1.0-beta',
+  version: '0.1.1-beta',
   connectNetwork: (networkId: NetworkId, customEndpoint?: string) =>
     ipcRenderer.invoke('xrpl:connect', networkId, customEndpoint),
   getStreamStatus: () => ipcRenderer.invoke('xrpl:getStatus'),
@@ -48,6 +48,11 @@ const api: XrplDesktopApi = {
   nodeOpsReadLogTail: (filePath: string, maxLines?: number) =>
     ipcRenderer.invoke('nodeOps:readLogTail', filePath, maxLines),
   dockerGetStatus: () => ipcRenderer.invoke('docker:getStatus'),
+  dockerChooseStorageFolder: () => ipcRenderer.invoke('docker:chooseStorageFolder'),
+  dockerSetStorageFolder: (customRoot: string | null) =>
+    ipcRenderer.invoke('docker:setStorageFolder', customRoot),
+  dockerInspectStorage: (targetPath?: string) =>
+    ipcRenderer.invoke('docker:inspectStorage', targetPath),
   dockerProvisionNode: (req: DockerProvisionRequest) => ipcRenderer.invoke('docker:provision', req),
   dockerLifecycleAction: (action: 'start' | 'stop' | 'restart' | 'remove') =>
     ipcRenderer.invoke('docker:lifecycle', action),

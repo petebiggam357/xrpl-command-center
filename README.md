@@ -6,7 +6,7 @@
 
 **Real-Time Cross-Platform XRP Ledger Telemetry, 3D Consensus Globe, Encrypted Multi-Wallet & Pro DeFi Studio, Institutional Primitives (`MPT`/`Oracle`/`DID`), 1-Click Docker Node Manager & SQLite Analytics**
 
-[![Version](https://img.shields.io/badge/version-v0.1.0--beta-22d3ee?style=flat-square)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v0.1.1--beta-22d3ee?style=flat-square)](CHANGELOG.md)
 [![Platforms](https://img.shields.io/badge/platforms-AppImage%20%7C%20exe%20%7C%20dmg-34d399?style=flat-square)](#cross-platform-packaging)
 [![Security](https://img.shields.io/badge/vault-Rust%20Argon2id%20%2B%20Zeroize%20%2B%20Ledger%20USB-a78bfa?style=flat-square)](#security--vault-architecture)
 [![License](https://img.shields.io/badge/license-MIT-64748b?style=flat-square)](LICENSE)

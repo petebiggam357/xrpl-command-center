@@ -32,7 +32,7 @@ import { resolveRustSidecarBinaryPath, RustVaultSidecarClient } from './rustVaul
 import { WalletVaultService } from './walletVaultService';
 import { XrplStreamManager } from './xrplStream';
 
-const APP_VERSION = '0.1.0-beta';
+const APP_VERSION = '0.1.1-beta';
 const LEDGER_USB_VENDOR_ID = 0x2c97;
 
 let mainWindow: BrowserWindow | null = null;
@@ -105,6 +105,46 @@ function resolveIconPath(): string {
   return app.isPackaged
     ? path.join(process.resourcesPath, 'icon.png')
     : path.join(__dirname, '..', 'build', 'icon.png');
+}
+
+/**
+ * On Linux desktops (Wayland/COSMIC/GNOME/KDE), running an .AppImage directly shows a generic
+ * dock icon unless a matching hicolor icon and .desktop entry with StartupWMClass exist in
+ * ~/.local/share. Sync them quietly on AppImage launch so the dock always shows our custom icon.
+ */
+async function ensureLinuxDesktopIconIntegration(): Promise<void> {
+  if (process.platform !== 'linux') return;
+  const appImagePath = process.env.APPIMAGE;
+  if (!appImagePath) return;
+
+  try {
+    const homeDir = app.getPath('home');
+    const iconDestDir = path.join(homeDir, '.local', 'share', 'icons', 'hicolor', '512x512', 'apps');
+    const iconDestPath = path.join(iconDestDir, 'xrpl-command-center.png');
+    const appsDir = path.join(homeDir, '.local', 'share', 'applications');
+    const desktopPath = path.join(appsDir, 'xrpl-command-center.desktop');
+
+    await fs.mkdir(iconDestDir, { recursive: true });
+    await fs.mkdir(appsDir, { recursive: true });
+    await fs.copyFile(resolveIconPath(), iconDestPath);
+
+    const desktopEntry = [
+      '[Desktop Entry]',
+      'Type=Application',
+      'Name=XRPL Command Center',
+      'Comment=Real-Time XRP Ledger Command Center, Rust Vault & Node Ops',
+      `Exec="${appImagePath}" --no-sandbox %U`,
+      `Icon=${iconDestPath}`,
+      'Terminal=false',
+      'Categories=Network;Development;Utility;',
+      'StartupWMClass=xrpl-command-center',
+      '',
+    ].join('\n');
+
+    await fs.writeFile(desktopPath, desktopEntry, 'utf8');
+  } catch {
+    // non-fatal on restricted filesystems
+  }
 }
 
 function setupTray(): void {
@@ -217,6 +257,7 @@ function configureAutoUpdater(): void {
 
 function createWindow(): void {
   const isDev = Boolean(process.env.VITE_DEV_SERVER_URL) || !app.isPackaged;
+  const appIcon = nativeImage.createFromPath(resolveIconPath());
 
   mainWindow = new BrowserWindow({
     width: 1540,
@@ -225,7 +266,7 @@ function createWindow(): void {
     minHeight: 720,
     backgroundColor: '#040811',
     title: `XRPL Command Center — v${APP_VERSION}`,
-    icon: resolveIconPath(),
+    icon: appIcon,
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -235,6 +276,10 @@ function createWindow(): void {
       backgroundThrottling: false,
     },
   });
+
+  if (process.platform === 'linux' && !appIcon.isEmpty()) {
+    mainWindow.setIcon(appIcon);
+  }
 
   // Hardened Electron session: deny unneeded browser permissions (WebHID is handled by setDevicePermissionHandler)
   mainWindow.webContents.session.setPermissionRequestHandler((_wc, _permission, callback) => {
@@ -338,6 +383,23 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle('docker:getStatus', () => dockerService.getStatus());
+  ipcMain.handle('docker:chooseStorageFolder', async () => {
+    const picked = await dialog.showOpenDialog({
+      title: 'Choose XRPL Node Storage Drive / Folder',
+      properties: ['openDirectory', 'createDirectory'],
+      buttonLabel: 'Use This Folder for XRPL Node',
+    });
+    if (picked.canceled || picked.filePaths.length === 0) {
+      return { ok: false, cancelled: true };
+    }
+    return dockerService.setCustomStorageRoot(picked.filePaths[0]);
+  });
+  ipcMain.handle('docker:setStorageFolder', (_evt, customRoot: string | null) =>
+    dockerService.setCustomStorageRoot(customRoot)
+  );
+  ipcMain.handle('docker:inspectStorage', (_evt, targetPath?: string) =>
+    dockerService.inspectStoragePath(targetPath)
+  );
   ipcMain.handle('docker:provision', (_evt, req: DockerProvisionRequest) =>
     dockerService.provisionNode(req)
   );
@@ -700,6 +762,7 @@ app.whenReady().then(() => {
 
   configureAutoUpdater();
   registerIpcHandlers();
+  void ensureLinuxDesktopIconIntegration();
   createWindow();
   setupTray();
   void streamManager.connect('mainnet');

@@ -6,12 +6,15 @@ import {
   Copy,
   FileDiff,
   FileText,
+  FolderOpen,
   GitBranch,
+  HardDrive,
   Lock,
   Network,
   Power,
   Radio,
   RefreshCw,
+  RotateCcw,
   Save,
   Server,
   Shield,
@@ -68,6 +71,8 @@ export const NodeOpsDeck: React.FC = () => {
   const [dockerDb, setDockerDb] = useState<LedgerDbBackend>('NuDB');
   const [dockerRetention, setDockerRetention] = useState('2000');
   const [dockerLogs, setDockerLogs] = useState<string[]>([]);
+  const [storagePathInput, setStoragePathInput] = useState('');
+  const [storageBusy, setStorageBusy] = useState(false);
 
   // Track 1: Visual rippled.cfg & validators.txt Diff Studio State
   const [cfgDir, setCfgDir] = useState('');
@@ -96,9 +101,51 @@ export const NodeOpsDeck: React.FC = () => {
   const refreshDocker = async () => {
     const st = await getXrplBridge().dockerGetStatus();
     setDockerStatus(st);
+    if (st.storageRoot) {
+      setStoragePathInput(st.storageRoot);
+    }
     if (st.containerExists) {
       const lg = await getXrplBridge().dockerReadLogs(80);
       if (lg.ok) setDockerLogs(lg.lines);
+    }
+  };
+
+  const handleChooseStorageFolder = async () => {
+    setStorageBusy(true);
+    setDockerBanner(null);
+    const res = await getXrplBridge().dockerChooseStorageFolder();
+    setStorageBusy(false);
+    if (res.cancelled) return;
+    if (res.ok && res.status) {
+      setDockerStatus(res.status);
+      setStoragePathInput(res.status.storageRoot);
+      setCfgDir(res.status.configDir);
+      setDockerBanner({
+        ok: true,
+        text: `Node storage folder updated to ${res.status.storageRoot} (${res.storageInfo?.freeGb !== null && res.storageInfo?.freeGb !== undefined ? `${res.storageInfo.freeGb} GB free` : 'writable'}).`,
+      });
+    } else {
+      setDockerBanner({ ok: false, text: res.error ?? 'Could not select storage folder.' });
+    }
+  };
+
+  const handleApplyStoragePath = async (customPath: string | null) => {
+    setStorageBusy(true);
+    setDockerBanner(null);
+    const res = await getXrplBridge().dockerSetStorageFolder(customPath);
+    setStorageBusy(false);
+    if (res.ok && res.status) {
+      setDockerStatus(res.status);
+      setStoragePathInput(res.status.storageRoot);
+      setCfgDir(res.status.configDir);
+      setDockerBanner({
+        ok: true,
+        text: customPath
+          ? `Node storage folder set to ${res.status.storageRoot}.`
+          : `Reset node storage folder to default (${res.status.storageRoot}).`,
+      });
+    } else {
+      setDockerBanner({ ok: false, text: res.error ?? 'Invalid or unwritable storage folder.' });
     }
   };
 
@@ -138,6 +185,7 @@ export const NodeOpsDeck: React.FC = () => {
       sizing: dockerSizing,
       dbBackend: dockerDb,
       onlineDeleteLedgers: Number(dockerRetention) || 2000,
+      storageRoot: storagePathInput.trim() || undefined,
     });
     setDockerBusy(false);
     if (res.status) setDockerStatus(res.status);
@@ -562,10 +610,130 @@ export const NodeOpsDeck: React.FC = () => {
               </div>
 
               <div className="md:col-span-2 rounded-xl bg-slate-950 border border-slate-800 p-3">
-                <div className="text-[10px] uppercase text-slate-500">Managed Config Directory</div>
-                <div className="text-cyan-300 text-[11px] truncate mt-1">
-                  {dockerStatus?.configDir || '—'}
+                <div className="flex items-center justify-between">
+                  <div className="text-[10px] uppercase text-slate-500">Active Ledger Data Directory</div>
+                  <span
+                    className={`px-1.5 py-0.5 rounded text-[9px] font-mono ${
+                      dockerStatus?.storageInfo?.isDefault === false
+                        ? 'bg-emerald-500/15 border border-emerald-400/40 text-emerald-300'
+                        : 'bg-slate-900 border border-slate-700 text-slate-400'
+                    }`}
+                  >
+                    {dockerStatus?.storageInfo?.isDefault === false ? 'CUSTOM DRIVE' : 'DEFAULT DRIVE'}
+                  </span>
                 </div>
+                <div className="text-cyan-300 text-[11px] truncate mt-1" title={dockerStatus?.dataDir}>
+                  {dockerStatus?.dataDir || '—'}
+                </div>
+              </div>
+            </div>
+
+            {/* Custom Node Storage Drive & Folder Picker (v0.1.1-beta) */}
+            <div className="rounded-xl bg-slate-950/90 border border-cyan-400/25 p-3.5 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <HardDrive className="w-4 h-4 text-cyan-400" />
+                  <div>
+                    <div className="text-xs font-semibold text-cyan-200">
+                      Node Storage Drive &amp; Database Location
+                    </div>
+                    <div className="text-[11px] text-slate-400">
+                      Store large <code className="text-cyan-300">NuDB</code> / <code className="text-cyan-300">RocksDB</code> ledger history on a fast secondary internal NVMe or external SSD instead of your OS drive.
+                    </div>
+                  </div>
+                </div>
+
+                {dockerStatus?.storageInfo?.freeGb !== null &&
+                  dockerStatus?.storageInfo?.freeGb !== undefined && (
+                    <div className="font-mono text-right">
+                      <div
+                        className={`text-xs font-bold tabular-nums ${
+                          dockerStatus.storageInfo.freeGb >= 100
+                            ? 'text-emerald-300'
+                            : dockerStatus.storageInfo.freeGb >= 30
+                              ? 'text-amber-300'
+                              : 'text-rose-300'
+                        }`}
+                      >
+                        {dockerStatus.storageInfo.freeGb >= 1024
+                          ? `${(dockerStatus.storageInfo.freeGb / 1024).toFixed(2)} TB free`
+                          : `${dockerStatus.storageInfo.freeGb.toFixed(1)} GB free`}
+                      </div>
+                      {dockerStatus.storageInfo.totalGb !== null &&
+                        dockerStatus.storageInfo.totalGb !== undefined && (
+                          <div className="text-[10px] text-slate-500 tabular-nums">
+                            of{' '}
+                            {dockerStatus.storageInfo.totalGb >= 1024
+                              ? `${(dockerStatus.storageInfo.totalGb / 1024).toFixed(2)} TB`
+                              : `${dockerStatus.storageInfo.totalGb.toFixed(0)} GB`}{' '}
+                            drive
+                          </div>
+                        )}
+                    </div>
+                  )}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  type="text"
+                  value={storagePathInput}
+                  onChange={(e) => setStoragePathInput(e.target.value)}
+                  placeholder="/mnt/nvme-ssd/xrpl-node"
+                  className="flex-1 min-w-[240px] rounded-lg bg-slate-900 border border-slate-700 px-3 py-1.5 text-xs font-mono text-white focus:outline-none focus:border-cyan-400"
+                />
+                <button
+                  type="button"
+                  disabled={storageBusy}
+                  onClick={() => void handleChooseStorageFolder()}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-500/20 border border-cyan-400/50 text-xs font-mono text-cyan-200 hover:bg-cyan-500/30 disabled:opacity-40"
+                >
+                  <FolderOpen className="w-3.5 h-3.5" />
+                  Browse Drive / Folder…
+                </button>
+                <button
+                  type="button"
+                  disabled={storageBusy || !storagePathInput.trim()}
+                  onClick={() => void handleApplyStoragePath(storagePathInput.trim())}
+                  className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs font-mono text-slate-200 hover:border-emerald-400/50 disabled:opacity-40"
+                >
+                  Apply Path
+                </button>
+                {dockerStatus?.storageInfo?.isDefault === false && (
+                  <button
+                    type="button"
+                    disabled={storageBusy}
+                    onClick={() => void handleApplyStoragePath(null)}
+                    title="Reset back to default app storage directory"
+                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs font-mono text-slate-400 hover:text-white disabled:opacity-40"
+                  >
+                    <RotateCcw className="w-3 h-3" />
+                    Default
+                  </button>
+                )}
+              </div>
+
+              {dockerStatus?.storageInfo &&
+                dockerStatus.storageInfo.freeGb !== null &&
+                dockerStatus.storageInfo.freeGb < 30 && (
+                  <div className="flex items-center gap-2 text-[11px] font-mono text-rose-200 bg-rose-500/10 border border-rose-400/30 rounded-lg px-2.5 py-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-rose-300" />
+                    Low free space ({dockerStatus.storageInfo.freeGb.toFixed(1)} GB) on this drive. Pick a larger internal NVMe or external SSD for Mainnet ledger storage.
+                  </div>
+                )}
+
+              {dockerStatus?.containerExists &&
+                dockerStatus.mountedDataDir &&
+                dockerStatus.dataDir &&
+                dockerStatus.mountedDataDir !== dockerStatus.dataDir && (
+                  <div className="flex items-center gap-2 text-[11px] font-mono text-amber-200 bg-amber-500/10 border border-amber-400/30 rounded-lg px-2.5 py-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-amber-300" />
+                    Running container is currently mounted at <code className="text-amber-100">{dockerStatus.mountedDataDir}</code>. Click <strong>Provision &amp; Launch</strong> to re-mount on your new folder.
+                  </div>
+                )}
+
+              <div className="text-[10px] font-mono text-slate-500 flex flex-wrap gap-x-4 gap-y-1">
+                <span>Config: {dockerStatus?.configDir || '—'}</span>
+                <span>Ledger DB: {dockerStatus?.dataDir ? `${dockerStatus.dataDir}/db` : '—'}</span>
               </div>
             </div>
 

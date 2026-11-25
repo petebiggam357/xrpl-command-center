@@ -2,6 +2,15 @@
 
 All notable changes to **XRPL Command Center** are documented in this file.
 
+## [0.1.1-beta] - 2026-11-25
+
+### Added
+- **Custom Node Storage Drive & Folder Picker (`My Node Ops -> 1-Click Docker Node`):**
+  - Choose any internal NVMe, secondary hard drive, or fast external SSD folder via native OS directory picker (`Browse Drive / Folder…`) or direct path entry to store large `NuDB` / `RocksDB` ledger databases off your OS root drive.
+  - Persistent storage configuration (`node-storage-settings.json`) with live cross-platform drive free-space inspection (`fs.statfs`), low-disk-space warnings (`< 30 GB`), `Reset to Default`, and active container mount mismatch detection.
+- **Native Linux AppImage & Desktop Dock Icon Integration:**
+  - Bundled crisp multi-resolution PNG icon set (`16x16` through `512x512` in `build/icons/`), `StartupWMClass=xrpl-command-center` in `electron-builder.yml`, `nativeImage` window icon binding, and automatic Linux AppImage desktop/hicolor icon registration (`~/.local/share/icons` + `~/.local/share/applications`) so the running dock icon matches the XRPL Command Center emblem.
+
 ## [0.1.0-beta] - 2026-11-25
 
 ### Added

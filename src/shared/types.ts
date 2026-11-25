@@ -263,6 +263,20 @@ export interface DesktopNotificationPayload {
 // Track 1: Docker Node Lifecycle & Visual rippled.cfg Studio Types
 // ============================================================================
 
+export interface NodeStorageInfo {
+  storageRoot: string;
+  configDir: string;
+  dataDir: string;
+  isDefault: boolean;
+  exists: boolean;
+  writable: boolean;
+  freeBytes: number | null;
+  totalBytes: number | null;
+  freeGb: number | null;
+  totalGb: number | null;
+  error?: string;
+}
+
 export interface DockerNodeStatus {
   dockerInstalled: boolean;
   daemonRunning: boolean;
@@ -273,7 +287,11 @@ export interface DockerNodeStatus {
   containerState?: string;
   image?: string;
   network?: 'mainnet' | 'testnet' | 'devnet';
+  storageRoot: string;
   configDir: string;
+  dataDir: string;
+  mountedDataDir?: string;
+  storageInfo?: NodeStorageInfo;
   portsSummary?: string;
   error?: string;
 }
@@ -283,6 +301,7 @@ export interface DockerProvisionRequest {
   sizing: '16gb-light' | '32gb-standard' | '64gb-full';
   dbBackend: 'NuDB' | 'RocksDB';
   onlineDeleteLedgers: number;
+  storageRoot?: string;
   image?: string;
 }
 
@@ -810,6 +829,20 @@ export interface XrplDesktopApi {
   ) => Promise<{ ok: boolean; result?: unknown; error?: string }>;
   nodeOpsReadLogTail: (filePath: string, maxLines?: number) => Promise<{ ok: boolean; lines: string[]; error?: string }>;
   dockerGetStatus: () => Promise<DockerNodeStatus>;
+  dockerChooseStorageFolder: () => Promise<{
+    ok: boolean;
+    cancelled?: boolean;
+    storageInfo?: NodeStorageInfo;
+    status?: DockerNodeStatus;
+    error?: string;
+  }>;
+  dockerSetStorageFolder: (customRoot: string | null) => Promise<{
+    ok: boolean;
+    storageInfo?: NodeStorageInfo;
+    status?: DockerNodeStatus;
+    error?: string;
+  }>;
+  dockerInspectStorage: (targetPath?: string) => Promise<NodeStorageInfo>;
   dockerProvisionNode: (req: DockerProvisionRequest) => Promise<{ ok: boolean; message?: string; status?: DockerNodeStatus; error?: string }>;
   dockerLifecycleAction: (action: 'start' | 'stop' | 'restart' | 'remove') => Promise<{ ok: boolean; message?: string; status?: DockerNodeStatus; error?: string }>;
   dockerReadLogs: (tailLines?: number) => Promise<{ ok: boolean; lines: string[]; error?: string }>;
