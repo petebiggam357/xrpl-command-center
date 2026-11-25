@@ -2,6 +2,28 @@
 
 All notable changes to **XRPL Command Center** are documented in this file.
 
+## [0.1.0-beta] - 2026-11-25
+
+### Added
+- **Track 1 — Smart Address Book, Exchange Destination-Tag Guard & X-Address Support:**
+  - Full persistent Address Book inside `Wallets & DeFi` (`AddressBookPanel`) with categories (`Personal`, `Exchange`, `Issuer`, `Other`), default Destination Tags, and automatic human-readable address labels across the Live Tx Tape, Universal Inspector, and Send Payment form.
+  - Real-time **Destination-Tag Safety Guard** (`checkDestinationTagSafety`) warning before sending to known exchanges (Coinbase, Kraken, Bitstamp, Binance, Uphold, KuCoin, Crypto.com) or user-flagged contacts without a Destination Tag.
+  - Native **X-Address** encode/decode (`xrpl.xAddressToClassicAddress` / `classicAddressToXAddress`) integrated directly into Send Payment and Address Book.
+- **Track 2 — Live USD Valuations, HUD Price Ticker & Whale Radar:**
+  - Real-time **XRP/USD spot ticker** (CoinGecko + Coinbase Spot fallback) in the Top HUD Bar and live USD valuations across Wallet Portfolio balances.
+  - Customizable **Whale Radar** filter in the Live Tx Tape (`≥ 10K / 50K / 100K / 500K XRP`) + 1-click **Save to Address Book** & **Watch** buttons in the Universal Inspector.
+- **Track 3 — Searchable Account Tx History, UTF-8 Memo Decoder & Visual NFT Gallery:**
+  - Searchable account transaction history inside Wallets with automatic **UTF-8 Memo decoding** (`decodeXrplMemos`), **1-click Repeat Payment**, and decoded Memos inside the Universal Inspector.
+  - Safe IPFS/HTTPS **Visual NFT Gallery** preview cards in `Escrows, Checks & NFTs`.
+- **Track 4 — 1-Click Encrypted `.xrplvault` Backup/Restore, Top-Bar Vault Pill & XRPL Reserve Meter:**
+  - Native OS file dialog **Export / Restore** of Rust-encrypted `.xrplvault` backup files (Argon2id + AES-256-GCM ciphertext only — never touches plaintext seeds), with automatic `.bak` safety snapshots before restore.
+  - Persistent **Vault Open / Locked** status pill in the Top HUD Bar and a visual **XRPL Reserve Meter** (`1 XRP base + 0.2 XRP/object` vs spendable XRP).
+- **Track 5 — 1-Click Testnet Playground, Quick-Start Modal & Amendment Voting Radar:**
+  - Skippable **Quick-Start Welcome Modal** (`QuickStartModal`) featuring a 1-Click Testnet Playground launcher and plain-English XRPL Reserve & Destination Tag cheat sheet.
+  - Live **XRPL Protocol Amendment Voting Radar** inside `Validator Constellation` tracking pending & enabled amendments with visual 80% supermajority progress bars.
+- **60fps Command Deck Performance Overhaul:**
+  - Eliminated per-transaction Rust sidecar RPC calls via O(1) synchronous `trackedAddresses` cache, decoupled 60fps canvases onto a zero-React-overhead visual event bus (`streamVisualBus.ts`), batched Zustand UI commits to ~6.5 Hz, cached static pipeline layers & radial glow gradients, added delta-time (`dt`) physics, and added a 25s dead-socket failover watchdog.
+
 ## [0.0.3-alpha] - 2026-11-25
 
 ### Added

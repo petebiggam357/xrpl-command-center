@@ -26,7 +26,7 @@ function subscribeChannel<T>(channel: string, cb: (payload: T) => void): () => v
 const api: XrplDesktopApi = {
   isElectron: true,
   platform: process.platform,
-  version: '0.0.3-alpha',
+  version: '0.1.0-beta',
   connectNetwork: (networkId: NetworkId, customEndpoint?: string) =>
     ipcRenderer.invoke('xrpl:connect', networkId, customEndpoint),
   getStreamStatus: () => ipcRenderer.invoke('xrpl:getStatus'),
@@ -110,6 +110,15 @@ const api: XrplDesktopApi = {
   systemUpdateTraySettings: (patch: { minimizeToTray?: boolean; nodeWatchdogEnabled?: boolean }) =>
     ipcRenderer.invoke('system:updateTraySettings', patch),
   systemCheckForUpdates: () => ipcRenderer.invoke('system:checkForUpdates'),
+
+  // v0.1.0-beta: Live Prices, Amendment Voting, X-Address Codec & Encrypted Vault Backups
+  fetchMarketPrices: () => ipcRenderer.invoke('market:fetchPrices'),
+  fetchAmendments: () => ipcRenderer.invoke('xrpl:fetchAmendments'),
+  decodeXAddress: (xAddress: string) => ipcRenderer.invoke('wallet:decodeXAddress', xAddress),
+  encodeXAddress: (classicAddress: string, tag?: number | null, isTestnet?: boolean) =>
+    ipcRenderer.invoke('wallet:encodeXAddress', classicAddress, tag, isTestnet),
+  walletExportBackup: () => ipcRenderer.invoke('wallet:exportBackup'),
+  walletImportBackup: () => ipcRenderer.invoke('wallet:importBackup'),
 
   notifyDesktop: (payload: DesktopNotificationPayload) => ipcRenderer.invoke('desktop:notify', payload),
   onStreamStatus: (cb: (status: StreamStatus) => void) => subscribeChannel('xrpl:status', cb),

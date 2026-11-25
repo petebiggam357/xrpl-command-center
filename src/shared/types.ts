@@ -707,6 +707,79 @@ export interface TrayAndUpdaterSettings {
   updateMessage?: string;
 }
 
+// ============================================================================
+// v0.1.0-beta Polish & Utility Suite Types
+// ============================================================================
+
+export interface AddressBookContact {
+  id: string;
+  label: string;
+  address: string;
+  defaultTag?: number;
+  requireTag?: boolean;
+  category: 'exchange' | 'personal' | 'issuer' | 'other';
+  notes?: string;
+  createdAt: number;
+}
+
+export interface DecodedMemo {
+  type?: string;
+  data?: string;
+  format?: string;
+}
+
+export interface ReserveBreakdown {
+  totalXrp: number;
+  baseReserveXrp: number;
+  ownerReserveXrp: number;
+  ownerCount: number;
+  lockedXrp: number;
+  spendableXrp: number;
+  lockedPct: number;
+  spendablePct: number;
+}
+
+export interface MarketPriceSnapshot {
+  xrpUsd: number | null;
+  change24hPct: number | null;
+  source: string;
+  fetchedAt: number;
+}
+
+export interface AmendmentVoteRecord {
+  id: string;
+  name: string;
+  enabled: boolean;
+  supported: boolean;
+  count: number;
+  threshold: number;
+  percent: number;
+  vetoed?: boolean;
+}
+
+export interface XAddressDecodeResult {
+  ok: boolean;
+  classicAddress?: string;
+  tag?: number | null;
+  test?: boolean;
+  error?: string;
+}
+
+export interface XAddressEncodeResult {
+  ok: boolean;
+  xAddress?: string;
+  error?: string;
+}
+
+export interface VaultBackupResult {
+  ok: boolean;
+  filePath?: string;
+  cancelled?: boolean;
+  status?: VaultStatus;
+  message?: string;
+  error?: string;
+}
+
 export interface XrplDesktopApi {
   isElectron: true;
   platform: string;
@@ -801,6 +874,14 @@ export interface XrplDesktopApi {
   systemGetTrayUpdaterState: () => Promise<TrayAndUpdaterSettings>;
   systemUpdateTraySettings: (patch: { minimizeToTray?: boolean; nodeWatchdogEnabled?: boolean }) => Promise<TrayAndUpdaterSettings>;
   systemCheckForUpdates: () => Promise<TrayAndUpdaterSettings>;
+
+  // v0.1.0-beta: Live Prices, Amendment Voting, X-Address Codec & Encrypted Vault Backups
+  fetchMarketPrices: () => Promise<MarketPriceSnapshot>;
+  fetchAmendments: () => Promise<{ amendments: AmendmentVoteRecord[]; source: string; fetchedAt: number }>;
+  decodeXAddress: (xAddress: string) => Promise<XAddressDecodeResult>;
+  encodeXAddress: (classicAddress: string, tag?: number | null, isTestnet?: boolean) => Promise<XAddressEncodeResult>;
+  walletExportBackup: () => Promise<VaultBackupResult>;
+  walletImportBackup: () => Promise<VaultBackupResult>;
 
   notifyDesktop: (payload: DesktopNotificationPayload) => Promise<void>;
   onStreamStatus: (cb: (status: StreamStatus) => void) => () => void;

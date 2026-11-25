@@ -1,7 +1,9 @@
 import type {
+  AmendmentVoteRecord,
   DidResolutionReport,
   InspectorResult,
   LiveTransaction,
+  MarketPriceSnapshot,
   NetworkId,
   OracleAggregateReport,
   OrderbookLevel,
@@ -133,7 +135,7 @@ async function fetchJsonWithTimeout<T>(url: string, timeoutMs = 10_000): Promise
       signal: controller.signal,
       headers: {
         Accept: 'application/json',
-        'User-Agent': 'XRPL-Command-Center/0.0.2-alpha',
+        'User-Agent': 'XRPL-Command-Center/0.1.0-beta',
       },
     });
     if (!res.ok) {
@@ -151,6 +153,178 @@ export class DirectoryService {
     CacheSlot<{ validators: ValidatorRecord[]; topology: TopologyNode[]; source: string }>
   >();
   private tokenCache = new Map<string, CacheSlot<{ tokens: TokenRecord[]; source: string }>>();
+  private priceCache: CacheSlot<MarketPriceSnapshot> | null = null;
+  private amendmentCache: CacheSlot<{ amendments: AmendmentVoteRecord[]; source: string }> | null = null;
+
+  public async fetchMarketPrices(): Promise<MarketPriceSnapshot> {
+    if (this.priceCache && Date.now() - this.priceCache.fetchedAt < 60_000) {
+      return this.priceCache.data;
+    }
+
+    // 1) Try CoinGecko public simple price (includes 24h change)
+    try {
+      const cg = await fetchJsonWithTimeout<{
+        ripple?: { usd?: number; usd_24h_change?: number };
+      }>(
+        'https://api.coingecko.com/api/v3/simple/price?ids=ripple&vs_currencies=usd&include_24hr_change=true',
+        6_000
+      );
+      const usd = Number(cg?.ripple?.usd);
+      if (Number.isFinite(usd) && usd > 0) {
+        const snap: MarketPriceSnapshot = {
+          xrpUsd: usd,
+          change24hPct: Number.isFinite(Number(cg?.ripple?.usd_24h_change))
+            ? Number(Number(cg.ripple!.usd_24h_change).toFixed(2))
+            : null,
+          source: 'CoinGecko',
+          fetchedAt: Date.now(),
+        };
+        this.priceCache = { fetchedAt: Date.now(), data: snap };
+        return snap;
+      }
+    } catch {
+      // fall through to Coinbase Spot
+    }
+
+    // 2) Fallback: Coinbase Spot XRP-USD
+    try {
+      const cb = await fetchJsonWithTimeout<{ data?: { amount?: string } }>(
+        'https://api.coinbase.com/v2/prices/XRP-USD/spot',
+        6_000
+      );
+      const usd = Number(cb?.data?.amount);
+      if (Number.isFinite(usd) && usd > 0) {
+        const snap: MarketPriceSnapshot = {
+          xrpUsd: usd,
+          change24hPct: null,
+          source: 'Coinbase Spot',
+          fetchedAt: Date.now(),
+        };
+        this.priceCache = { fetchedAt: Date.now(), data: snap };
+        return snap;
+      }
+    } catch {
+      // ignore
+    }
+
+    return (
+      this.priceCache?.data ?? {
+        xrpUsd: null,
+        change24hPct: null,
+        source: 'offline',
+        fetchedAt: Date.now(),
+      }
+    );
+  }
+
+  public async fetchAmendments(
+    stream: XrplStreamManager
+  ): Promise<{ amendments: AmendmentVoteRecord[]; source: string; fetchedAt: number }> {
+    if (this.amendmentCache && Date.now() - this.amendmentCache.fetchedAt < 90_000) {
+      return { ...this.amendmentCache.data, fetchedAt: this.amendmentCache.fetchedAt };
+    }
+
+    // 1) Try XRPSCAN public amendments endpoint (works even when connected to Clio)
+    try {
+      const rows = await fetchJsonWithTimeout<
+        Array<{
+          id?: string;
+          name?: string;
+          enabled?: boolean;
+          supported?: boolean;
+          count?: number;
+          threshold?: number;
+          validations?: number;
+          vetoed?: boolean | string;
+        }>
+      >('https://api.xrpscan.com/api/v1/amendments', 8_000);
+
+      if (Array.isArray(rows) && rows.length > 0) {
+        const amendments: AmendmentVoteRecord[] = rows
+          .filter((r) => r.name || r.id)
+          .map((r) => {
+            const count = Number(r.count ?? 0);
+            const threshold = Number(r.threshold ?? 28) || 28;
+            const total = Number(r.validations ?? Math.round(threshold / 0.8)) || 35;
+            const percent = r.enabled
+              ? 100
+              : Math.min(100, Number(((count / Math.max(1, total)) * 100).toFixed(1)));
+            return {
+              id: String(r.id ?? r.name),
+              name: String(r.name ?? r.id),
+              enabled: Boolean(r.enabled),
+              supported: r.supported !== false,
+              count,
+              threshold,
+              percent,
+              vetoed: r.vetoed === true || r.vetoed === 'Obsolete',
+            };
+          })
+          .sort((a, b) => {
+            if (a.enabled !== b.enabled) return a.enabled ? 1 : -1;
+            return b.percent - a.percent;
+          });
+
+        const payload = { amendments, source: 'XRPScan Live UNL' };
+        this.amendmentCache = { fetchedAt: Date.now(), data: payload };
+        return { ...payload, fetchedAt: Date.now() };
+      }
+    } catch {
+      // fall through to direct rippled `feature` RPC
+    }
+
+    // 2) Fallback: Direct `feature` RPC on connected node
+    try {
+      const res = await stream.request('feature', {});
+      const features = ((res.result as Record<string, unknown> | undefined)?.features ??
+        {}) as Record<
+        string,
+        {
+          name?: string;
+          enabled?: boolean;
+          supported?: boolean;
+          count?: number;
+          threshold?: number;
+          validations?: number;
+          vetoed?: boolean | string;
+        }
+      >;
+
+      const amendments: AmendmentVoteRecord[] = Object.entries(features)
+        .map(([id, f]) => {
+          const count = Number(f.count ?? 0);
+          const threshold = Number(f.threshold ?? 28) || 28;
+          const total = Number(f.validations ?? Math.round(threshold / 0.8)) || 35;
+          const percent = f.enabled
+            ? 100
+            : Math.min(100, Number(((count / Math.max(1, total)) * 100).toFixed(1)));
+          return {
+            id,
+            name: String(f.name ?? id.slice(0, 12)),
+            enabled: Boolean(f.enabled),
+            supported: f.supported !== false,
+            count,
+            threshold,
+            percent,
+            vetoed: f.vetoed === true || f.vetoed === 'Obsolete',
+          };
+        })
+        .sort((a, b) => {
+          if (a.enabled !== b.enabled) return a.enabled ? 1 : -1;
+          return b.percent - a.percent;
+        });
+
+      const payload = { amendments, source: 'XRPL feature RPC' };
+      this.amendmentCache = { fetchedAt: Date.now(), data: payload };
+      return { ...payload, fetchedAt: Date.now() };
+    } catch {
+      return {
+        amendments: this.amendmentCache?.data.amendments ?? [],
+        source: 'unavailable',
+        fetchedAt: Date.now(),
+      };
+    }
+  }
 
   public async fetchValidators(networkId: NetworkId): Promise<{
     validators: ValidatorRecord[];

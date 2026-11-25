@@ -1,10 +1,12 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   ArrowLeftRight,
+  BookUser,
   Check,
   Clock,
   Copy,
   Cpu,
+  Download,
   Droplets,
   Eye,
   KeyRound,
@@ -12,23 +14,37 @@ import {
   Plus,
   QrCode,
   RefreshCw,
+  Repeat,
   Route,
+  Search,
   Send,
+  ShieldAlert,
   ShieldCheck,
   Sparkles,
   Trash2,
   Unlock,
+  Upload,
   Users,
   Wallet as WalletIcon,
+  Wand2,
 } from 'lucide-react';
 import { connectLedgerXrpAccount } from '../services/ledgerWebHid';
 import { getXrplBridge } from '../services/xrplBridge';
+import {
+  checkDestinationTagSafety,
+  computeReserveBreakdown,
+  decodeXrplMemos,
+  formatUsd,
+  isXAddress,
+  resolveSafeMediaUri,
+} from '../shared/betaUtils';
 import type { PathFindQuote, WalletAlgorithm, WalletCheckEntry } from '../shared/types';
 import { shortenAddress } from '../shared/xrplCodec';
 import { useCommandStore } from '../store/useCommandStore';
+import { AddressBookPanel } from './AddressBookPanel';
 import { DexDepthCanvas } from './DexDepthCanvas';
 
-type WalletSubTab = 'portfolio' | 'send-trust' | 'dex-amm' | 'escrow-nft' | 'multisig';
+type WalletSubTab = 'portfolio' | 'send-trust' | 'contacts' | 'dex-amm' | 'escrow-nft' | 'multisig';
 
 const TRUSTLINE_PRESETS = [
   { label: 'RLUSD (Ripple USD)', currency: 'RLUSD', issuer: 'rMxCKbEDwqr76QuheSUMdEGf4B9xJ8m5De' },
@@ -50,8 +66,11 @@ export const WalletDeck: React.FC = () => {
   const openTxConfirmModal = useCommandStore((s) => s.openTxConfirmModal);
   const connectNetwork = useCommandStore((s) => s.connectNetwork);
   const inspectQuery = useCommandStore((s) => s.inspectQuery);
+  const contacts = useCommandStore((s) => s.contacts);
+  const marketPrice = useCommandStore((s) => s.marketPrice);
 
   const [subTab, setSubTab] = useState<WalletSubTab>('portfolio');
+  const [txHistorySearch, setTxHistorySearch] = useState('');
 
   // Vault & Onboarding
   const [passphrase, setPassphrase] = useState('');
@@ -286,9 +305,101 @@ export const WalletDeck: React.FC = () => {
     });
   };
 
-  const submitPaymentForm = (e: React.FormEvent) => {
+  const handleExportVaultBackup = async () => {
+    setVaultBannerMsg(null);
+    const res = await getXrplBridge().walletExportBackup();
+    if (res.cancelled) return;
+    setVaultBannerMsg({
+      ok: res.ok,
+      text: res.ok
+        ? `${res.message ?? 'Encrypted backup exported'} (${res.filePath ?? ''})`
+        : res.error ?? 'Backup export failed.',
+    });
+  };
+
+  const handleImportVaultBackup = async () => {
+    setVaultBannerMsg(null);
+    const res = await getXrplBridge().walletImportBackup();
+    if (res.cancelled) return;
+    if (res.ok) {
+      await refreshVaultStatus();
+    }
+    setVaultBannerMsg({
+      ok: res.ok,
+      text: res.ok
+        ? res.message ?? 'Encrypted vault restored. Unlock with your backup master passphrase.'
+        : res.error ?? 'Backup restore failed.',
+    });
+  };
+
+  const handleDecodePayXAddress = async () => {
+    if (!isXAddress(payDest)) return;
+    const dec = await getXrplBridge().decodeXAddress(payDest);
+    if (dec.ok && dec.classicAddress) {
+      setPayDest(dec.classicAddress);
+      if (dec.tag !== null && dec.tag !== undefined) {
+        setPayDestTag(String(dec.tag));
+      }
+      setVaultBannerMsg({
+        ok: true,
+        text: `Decoded X-Address → ${dec.classicAddress}${dec.tag !== null && dec.tag !== undefined ? ` (Tag ${dec.tag})` : ''}`,
+      });
+    } else {
+      setVaultBannerMsg({ ok: false, text: dec.error ?? 'Invalid X-Address' });
+    }
+  };
+
+  const destTagGuard = useMemo(
+    () => checkDestinationTagSafety(payDest, payDestTag, contacts),
+    [payDest, payDestTag, contacts]
+  );
+
+  const reserveBreakdown = useMemo(
+    () =>
+      computeReserveBreakdown(
+        walletPortfolio?.totalXrp ?? 0,
+        walletPortfolio?.baseReserveXrp ?? 1,
+        walletPortfolio?.ownerCount ?? 0,
+        0.2
+      ),
+    [walletPortfolio]
+  );
+
+  const filteredRecentTxs = useMemo(() => {
+    const list = walletPortfolio?.recentTransactions ?? [];
+    const q = txHistorySearch.trim().toLowerCase();
+    if (!q) return list;
+    return list.filter((tx) => {
+      const memos = decodeXrplMemos(tx.raw).map((m) => `${m.type ?? ''} ${m.data ?? ''}`).join(' ').toLowerCase();
+      return (
+        tx.txType.toLowerCase().includes(q) ||
+        tx.amountDisplay.toLowerCase().includes(q) ||
+        tx.account.toLowerCase().includes(q) ||
+        (tx.destination ?? '').toLowerCase().includes(q) ||
+        tx.hash.toLowerCase().includes(q) ||
+        memos.includes(q)
+      );
+    });
+  }, [walletPortfolio, txHistorySearch]);
+
+  const submitPaymentForm = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeAccount) return;
+    let resolvedDest = payDest.trim();
+    let parsedTag = payDestTag.trim() ? Number(payDestTag.trim()) : undefined;
+
+    if (isXAddress(resolvedDest)) {
+      const dec = await getXrplBridge().decodeXAddress(resolvedDest);
+      if (!dec.ok || !dec.classicAddress) {
+        setVaultBannerMsg({ ok: false, text: dec.error ?? 'Invalid X-Address destination.' });
+        return;
+      }
+      resolvedDest = dec.classicAddress;
+      if (dec.tag !== null && dec.tag !== undefined) {
+        parsedTag = dec.tag;
+      }
+    }
+
     let asset = { currency: 'XRP', value: payAmount.trim() } as {
       currency: string;
       issuer?: string;
@@ -298,11 +409,10 @@ export const WalletDeck: React.FC = () => {
       const [curRaw, issuer] = payAssetKey.split(':');
       asset = { currency: curRaw, issuer, value: payAmount.trim() };
     }
-    const parsedTag = payDestTag.trim() ? Number(payDestTag.trim()) : undefined;
     void openTxConfirmModal(activeAccount.id, {
       kind: 'Payment',
       account: activeAccount.address,
-      destination: payDest.trim(),
+      destination: resolvedDest,
       asset,
       destinationTag: parsedTag !== undefined && Number.isFinite(parsedTag) ? parsedTag : undefined,
       memoText: payMemo.trim() || undefined,
@@ -580,6 +690,26 @@ export const WalletDeck: React.FC = () => {
               Watch Address
             </button>
 
+            <button
+              type="button"
+              onClick={() => void handleExportVaultBackup()}
+              title="Export encrypted .xrplvault backup (Argon2id + AES-256-GCM ciphertext only)"
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs font-mono text-slate-200 hover:border-emerald-400/50"
+            >
+              <Download className="w-3.5 h-3.5 text-emerald-400" />
+              Backup
+            </button>
+
+            <button
+              type="button"
+              onClick={() => void handleImportVaultBackup()}
+              title="Restore an encrypted .xrplvault backup file"
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs font-mono text-slate-200 hover:border-amber-400/50"
+            >
+              <Upload className="w-3.5 h-3.5 text-amber-400" />
+              Restore
+            </button>
+
             {vaultStatus.unlocked && (
               <button
                 type="button"
@@ -807,24 +937,30 @@ export const WalletDeck: React.FC = () => {
                     <div className="text-lg font-bold text-white tabular-nums mt-0.5">
                       {walletPortfolio?.totalXrpDisplay ?? '0'} XRP
                     </div>
+                    {marketPrice.xrpUsd !== null && walletPortfolio && (
+                      <div className="text-[10px] text-emerald-300/90 tabular-nums mt-0.5">
+                        ≈ {formatUsd(walletPortfolio.totalXrp * marketPrice.xrpUsd)} USD
+                      </div>
+                    )}
                   </div>
                   <div className="rounded-xl bg-slate-950/80 border border-emerald-500/25 p-3">
                     <div className="text-[10px] uppercase text-slate-500">Spendable XRP</div>
                     <div className="text-lg font-bold text-emerald-300 tabular-nums mt-0.5">
                       {(walletPortfolio?.spendableXrp ?? 0).toLocaleString()} XRP
                     </div>
+                    {marketPrice.xrpUsd !== null && walletPortfolio && (
+                      <div className="text-[10px] text-slate-400 tabular-nums mt-0.5">
+                        ≈ {formatUsd(walletPortfolio.spendableXrp * marketPrice.xrpUsd)} available
+                      </div>
+                    )}
                   </div>
                   <div className="rounded-xl bg-slate-950/80 border border-slate-800 p-3">
                     <div className="text-[10px] uppercase text-slate-500">Locked Reserve</div>
                     <div className="text-lg font-bold text-cyan-300 tabular-nums mt-0.5">
-                      {(
-                        (walletPortfolio?.baseReserveXrp ?? 1) +
-                        (walletPortfolio?.ownerReserveXrp ?? 0)
-                      ).toFixed(2)}{' '}
-                      XRP
+                      {reserveBreakdown.lockedXrp.toFixed(2)} XRP
                     </div>
                     <div className="text-[10px] text-slate-500">
-                      {walletPortfolio?.baseReserveXrp ?? 1} base + {walletPortfolio?.ownerCount ?? 0} objects
+                      {reserveBreakdown.baseReserveXrp} base + {reserveBreakdown.ownerCount} objects ({reserveBreakdown.ownerReserveXrp.toFixed(1)})
                     </div>
                   </div>
                   <div className="rounded-xl bg-slate-950/80 border border-slate-800 p-3">
@@ -835,6 +971,31 @@ export const WalletDeck: React.FC = () => {
                     <div className="text-[10px] text-slate-500">Seq #{walletPortfolio?.sequence ?? 0}</div>
                   </div>
                 </div>
+
+                {/* Visual XRPL Reserve Breakdown Bar */}
+                {walletPortfolio && walletPortfolio.totalXrp > 0 && (
+                  <div className="rounded-xl bg-slate-950/70 border border-slate-800/80 px-3 py-2 space-y-1.5 font-mono">
+                    <div className="flex items-center justify-between text-[10px]">
+                      <span className="text-slate-400">
+                        XRPL Reserve Meter: <span className="text-cyan-300">{reserveBreakdown.lockedXrp} XRP locked</span> ({reserveBreakdown.lockedPct}%) •{' '}
+                        <span className="text-emerald-300">{reserveBreakdown.spendableXrp.toLocaleString()} XRP spendable</span> ({reserveBreakdown.spendablePct}%)
+                      </span>
+                      <span className="text-slate-500 hidden sm:inline">
+                        Removing unused TrustLines frees 0.2 XRP each
+                      </span>
+                    </div>
+                    <div className="h-1.5 rounded-full bg-slate-800 overflow-hidden flex">
+                      <div
+                        className="bg-cyan-400 h-full"
+                        style={{ width: `${reserveBreakdown.lockedPct}%` }}
+                      />
+                      <div
+                        className="bg-emerald-400 h-full"
+                        style={{ width: `${reserveBreakdown.spendablePct}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Sub-Tabs */}
@@ -842,6 +1003,7 @@ export const WalletDeck: React.FC = () => {
                 {[
                   { id: 'portfolio', label: 'Overview & Activity', icon: WalletIcon },
                   { id: 'send-trust', label: 'Send & TrustLines', icon: Send },
+                  { id: 'contacts', label: `Address Book (${contacts.length})`, icon: BookUser },
                   { id: 'dex-amm', label: 'Pro DEX, PathSwap & AMM', icon: ArrowLeftRight },
                   { id: 'escrow-nft', label: 'Escrows, Checks & NFTs', icon: Sparkles },
                   { id: 'multisig', label: 'Multi-Sig & Air-Gapped', icon: Users },
@@ -951,25 +1113,91 @@ export const WalletDeck: React.FC = () => {
                     )}
 
                     <div className="pt-2 border-t border-slate-800">
-                      <div className="text-xs font-semibold uppercase tracking-[0.15em] text-cyan-300 mb-2">
-                        Recent Account Transactions
+                      <div className="flex items-center justify-between gap-2 mb-2">
+                        <div className="text-xs font-semibold uppercase tracking-[0.15em] text-cyan-300">
+                          Account Transaction History ({filteredRecentTxs.length})
+                        </div>
+                        <div className="relative">
+                          <Search className="w-3 h-3 text-slate-500 absolute left-2 top-1.5" />
+                          <input
+                            type="text"
+                            value={txHistorySearch}
+                            onChange={(e) => setTxHistorySearch(e.target.value)}
+                            placeholder="Filter type, memo, addr…"
+                            className="pl-6 pr-2 py-1 rounded-lg bg-slate-950 border border-slate-800 text-[11px] font-mono text-slate-200 w-44 focus:outline-none focus:border-cyan-400"
+                          />
+                        </div>
                       </div>
-                      <div className="space-y-1 max-h-40 overflow-y-auto">
-                        {(walletPortfolio?.recentTransactions ?? []).map((tx) => (
-                          <button
-                            key={tx.id}
-                            type="button"
-                            onClick={() => void inspectQuery(tx.hash)}
-                            className="w-full flex items-center justify-between px-2.5 py-1.5 rounded bg-slate-950/70 border border-slate-800/80 hover:border-cyan-400/40 font-mono text-xs"
-                          >
-                            <span className="text-slate-200">{tx.txType}</span>
-                            <span className="text-cyan-300 tabular-nums">{tx.amountDisplay}</span>
-                          </button>
-                        ))}
+                      <div className="space-y-1.5 max-h-52 overflow-y-auto">
+                        {filteredRecentTxs.map((tx) => {
+                          const memos = decodeXrplMemos(tx.raw);
+                          const isOutgoingPayment =
+                            tx.txType === 'Payment' &&
+                            tx.account === activeAccount.address &&
+                            Boolean(tx.destination);
+                          return (
+                            <div
+                              key={tx.id}
+                              className="px-2.5 py-2 rounded-lg bg-slate-950/75 border border-slate-800/80 hover:border-cyan-400/40 font-mono text-xs space-y-1"
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => void inspectQuery(tx.hash)}
+                                  className="text-left flex items-center gap-2 min-w-0 hover:text-cyan-300"
+                                >
+                                  <span className="text-slate-200 font-semibold">{tx.txType}</span>
+                                  {tx.destination && (
+                                    <span className="text-[10px] text-slate-500 truncate">
+                                      → {shortenAddress(tx.destination, 5, 4)}
+                                    </span>
+                                  )}
+                                </button>
+                                <div className="flex items-center gap-2 shrink-0">
+                                  <span className="text-cyan-300 tabular-nums">{tx.amountDisplay}</span>
+                                  {isOutgoingPayment && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setPayDest(tx.destination ?? '');
+                                        setPayAmount(
+                                          tx.currency === 'XRP'
+                                            ? String(tx.amountXrpEstimate || '')
+                                            : ''
+                                        );
+                                        setSubTab('send-trust');
+                                      }}
+                                      title="Repeat this payment"
+                                      className="p-1 rounded bg-cyan-500/15 border border-cyan-400/30 text-cyan-200 hover:bg-cyan-500/25"
+                                    >
+                                      <Repeat className="w-3 h-3" />
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                              {memos.length > 0 && (
+                                <div className="text-[10px] text-emerald-300/90 bg-emerald-500/5 border border-emerald-400/20 rounded px-2 py-0.5 truncate">
+                                  Memo: {memos.map((m) => m.data ?? m.type).filter(Boolean).join(' • ')}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   </div>
                 </div>
+              )}
+
+              {/* SUB-TAB 1B: ADDRESS BOOK */}
+              {subTab === 'contacts' && (
+                <AddressBookPanel
+                  onSendToContact={(address, defaultTag) => {
+                    setPayDest(address);
+                    setPayDestTag(defaultTag !== undefined ? String(defaultTag) : '');
+                    setSubTab('send-trust');
+                  }}
+                />
               )}
 
               {/* SUB-TAB 2: SEND & TRUSTLINES */}
@@ -996,14 +1224,74 @@ export const WalletDeck: React.FC = () => {
                       ))}
                     </select>
 
-                    <input
-                      required
-                      type="text"
-                      value={payDest}
-                      onChange={(e) => setPayDest(e.target.value)}
-                      placeholder="Destination r-Address"
-                      className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs font-mono text-white"
-                    />
+                    {contacts.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-[10px] font-mono uppercase text-slate-500">Quick Contact:</span>
+                        {contacts.slice(0, 5).map((c) => (
+                          <button
+                            key={c.id}
+                            type="button"
+                            onClick={() => {
+                              setPayDest(c.address);
+                              if (c.defaultTag !== undefined) setPayDestTag(String(c.defaultTag));
+                            }}
+                            className="px-2 py-0.5 rounded bg-slate-950 border border-slate-800 hover:border-cyan-400/50 text-[10px] font-mono text-slate-300"
+                          >
+                            {c.label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-mono uppercase text-slate-400">
+                          Destination (r-Address or X-Address)
+                        </span>
+                        {isXAddress(payDest) && (
+                          <button
+                            type="button"
+                            onClick={() => void handleDecodePayXAddress()}
+                            className="flex items-center gap-1 text-[10px] font-mono text-emerald-300 hover:underline"
+                          >
+                            <Wand2 className="w-3 h-3" />
+                            Decode X-Address
+                          </button>
+                        )}
+                      </div>
+                      <input
+                        required
+                        type="text"
+                        value={payDest}
+                        onChange={(e) => setPayDest(e.target.value)}
+                        placeholder="Destination r-Address or X-Address"
+                        className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs font-mono text-white"
+                      />
+                    </div>
+
+                    {destTagGuard.level !== 'ok' && destTagGuard.message && (
+                      <div
+                        className={`p-2.5 rounded-xl border text-[11px] font-mono flex items-start gap-2 ${
+                          destTagGuard.level === 'danger'
+                            ? 'bg-rose-500/15 border-rose-400/50 text-rose-200'
+                            : 'bg-amber-500/15 border-amber-400/50 text-amber-200'
+                        }`}
+                      >
+                        <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5" />
+                        <div className="flex-1">
+                          <div>{destTagGuard.message}</div>
+                          {destTagGuard.suggestedTag !== undefined && (
+                            <button
+                              type="button"
+                              onClick={() => setPayDestTag(String(destTagGuard.suggestedTag))}
+                              className="mt-1 px-2 py-0.5 rounded bg-slate-950 border border-amber-400/40 text-[10px] text-amber-200 hover:bg-amber-500/20"
+                            >
+                              Apply Saved Tag #{destTagGuard.suggestedTag}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )}
 
                     <div className="grid grid-cols-2 gap-2">
                       <input
@@ -1578,16 +1866,31 @@ export const WalletDeck: React.FC = () => {
 
                     {(walletPortfolio?.nfts.length ?? 0) > 0 && (
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5">
-                        {walletPortfolio!.nfts.map((nft) => (
+                        {walletPortfolio!.nfts.map((nft) => {
+                          const media = resolveSafeMediaUri(nft.uriDecoded);
+                          return (
                           <div
                             key={nft.nftokenId}
                             className="p-3 rounded-xl bg-slate-950/80 border border-slate-800 font-mono text-xs space-y-2"
                           >
+                            {media.gatewayUrl && media.isImageLikely && (
+                              <div className="h-28 rounded-lg bg-slate-900 border border-slate-800 overflow-hidden flex items-center justify-center">
+                                <img
+                                  src={media.gatewayUrl}
+                                  alt={`NFT #${nft.serial}`}
+                                  loading="lazy"
+                                  className="w-full h-full object-cover"
+                                  onError={(e) => {
+                                    (e.currentTarget as HTMLImageElement).style.display = 'none';
+                                  }}
+                                />
+                              </div>
+                            )}
                             <div className="flex items-center justify-between">
                               <span className="text-fuchsia-300 font-bold">Serial #{nft.serial}</span>
                               <span className="text-[10px] text-slate-500">Taxon {nft.taxon}</span>
                             </div>
-                            <div className="text-[11px] text-slate-300 truncate">
+                            <div className="text-[11px] text-slate-300 truncate" title={media.displayUri || nft.nftokenId}>
                               {nft.uriDecoded ?? shortenAddress(nft.nftokenId, 10, 8)}
                             </div>
                             <div className="flex gap-1.5 pt-1">
@@ -1650,7 +1953,8 @@ export const WalletDeck: React.FC = () => {
                               </div>
                             )}
                           </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </div>

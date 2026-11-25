@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
-import { BellPlus, Code2, Loader2, X } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { BellPlus, BookPlus, Code2, Loader2, MessageSquareText, X } from 'lucide-react';
+import { decodeXrplMemos, resolveAddressLabel } from '../shared/betaUtils';
 import { shortenAddress } from '../shared/xrplCodec';
 import { useCommandStore } from '../store/useCommandStore';
 
@@ -10,8 +11,25 @@ export const InspectorDrawer: React.FC = () => {
   const closeInspector = useCommandStore((s) => s.closeInspector);
   const inspectQuery = useCommandStore((s) => s.inspectQuery);
   const addWatchlistEntry = useCommandStore((s) => s.addWatchlistEntry);
+  const addContact = useCommandStore((s) => s.addContact);
+  const contacts = useCommandStore((s) => s.contacts);
+  const vaultAccounts = useCommandStore((s) => s.vaultStatus.accounts);
 
   const [showRaw, setShowRaw] = useState(false);
+  const [savedNotice, setSavedNotice] = useState<string | null>(null);
+
+  const decodedMemos = useMemo(
+    () => (inspectorResult?.kind === 'transaction' ? decodeXrplMemos(inspectorResult.raw) : []),
+    [inspectorResult]
+  );
+
+  const resolvedLabel = useMemo(
+    () =>
+      inspectorResult?.kind === 'account'
+        ? resolveAddressLabel(inspectorResult.query, contacts, vaultAccounts)
+        : null,
+    [inspectorResult, contacts, vaultAccounts]
+  );
 
   if (!inspectorOpen) return null;
 
@@ -22,8 +40,15 @@ export const InspectorDrawer: React.FC = () => {
           <div className="text-[10px] font-mono uppercase tracking-[0.2em] text-cyan-400">
             On-Ledger Deep Inspector
           </div>
-          <h3 className="text-sm font-mono font-bold text-white truncate">
-            {inspectorLoading ? 'Querying XRPL Node…' : inspectorResult?.title ?? 'Inspector'}
+          <h3 className="text-sm font-mono font-bold text-white truncate flex items-center gap-2">
+            <span className="truncate">
+              {inspectorLoading ? 'Querying XRPL Node…' : inspectorResult?.title ?? 'Inspector'}
+            </span>
+            {resolvedLabel && (
+              <span className="shrink-0 px-1.5 py-0.5 rounded bg-emerald-500/15 border border-emerald-400/40 text-[10px] font-mono text-emerald-200">
+                {resolvedLabel.label}
+              </span>
+            )}
           </h3>
           {inspectorResult?.subtitle && (
             <div className="text-[11px] font-mono text-slate-400 truncate">
@@ -33,21 +58,43 @@ export const InspectorDrawer: React.FC = () => {
         </div>
         <div className="flex items-center gap-1.5">
           {inspectorResult?.kind === 'account' && (
-            <button
-              type="button"
-              onClick={() =>
-                addWatchlistEntry({
-                  label: inspectorResult.flags?.domain ?? shortenAddress(inspectorResult.query),
-                  type: 'account',
-                  target: inspectorResult.query,
-                  notifyOs: true,
-                })
-              }
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-cyan-500/15 border border-cyan-400/40 text-xs font-mono text-cyan-200 hover:bg-cyan-500/25"
-            >
-              <BellPlus className="w-3.5 h-3.5" />
-              Watch
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  addContact({
+                    label: inspectorResult.flags?.domain ?? shortenAddress(inspectorResult.query),
+                    address: inspectorResult.query,
+                    category: 'other',
+                    requireTag: Boolean(inspectorResult.flags?.requireDestTag),
+                  });
+                  setSavedNotice('Saved to Address Book');
+                  setTimeout(() => setSavedNotice(null), 2200);
+                }}
+                className="flex items-center gap-1 px-2 py-1.5 rounded-lg bg-emerald-500/15 border border-emerald-400/40 text-xs font-mono text-emerald-200 hover:bg-emerald-500/25"
+                title="Save account to Address Book"
+              >
+                <BookPlus className="w-3.5 h-3.5" />
+                Save
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  addWatchlistEntry({
+                    label: inspectorResult.flags?.domain ?? shortenAddress(inspectorResult.query),
+                    type: 'account',
+                    target: inspectorResult.query,
+                    notifyOs: true,
+                  });
+                  setSavedNotice('Added to Watchlist');
+                  setTimeout(() => setSavedNotice(null), 2200);
+                }}
+                className="flex items-center gap-1 px-2 py-1.5 rounded-lg bg-cyan-500/15 border border-cyan-400/40 text-xs font-mono text-cyan-200 hover:bg-cyan-500/25"
+              >
+                <BellPlus className="w-3.5 h-3.5" />
+                Watch
+              </button>
+            </>
           )}
           <button
             type="button"
@@ -72,6 +119,11 @@ export const InspectorDrawer: React.FC = () => {
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {savedNotice && (
+          <div className="rounded-lg bg-emerald-500/15 border border-emerald-400/40 px-3 py-1.5 text-xs font-mono text-emerald-200">
+            {savedNotice}
+          </div>
+        )}
         {inspectorLoading ? (
           <div className="py-20 flex flex-col items-center justify-center text-cyan-300 font-mono text-xs gap-2">
             <Loader2 className="w-6 h-6 animate-spin" />
@@ -104,6 +156,27 @@ export const InspectorDrawer: React.FC = () => {
                     </div>
                   </div>
                 ))}
+              </div>
+            )}
+
+            {decodedMemos.length > 0 && (
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-1.5 text-[10px] font-mono uppercase text-cyan-300">
+                  <MessageSquareText className="w-3.5 h-3.5" />
+                  Decoded UTF-8 Transaction Memos ({decodedMemos.length})
+                </div>
+                <div className="space-y-1.5">
+                  {decodedMemos.map((m, i) => (
+                    <div
+                      key={i}
+                      className="rounded-xl bg-cyan-500/5 border border-cyan-400/25 p-2.5 font-mono text-xs space-y-0.5"
+                    >
+                      {m.type && <div className="text-[10px] text-cyan-300">Type: {m.type}</div>}
+                      {m.data && <div className="text-slate-100 break-words">{m.data}</div>}
+                      {m.format && <div className="text-[10px] text-slate-500">Format: {m.format}</div>}
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 

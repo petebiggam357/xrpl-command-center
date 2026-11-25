@@ -1,11 +1,14 @@
 import React, { useState } from 'react';
 import {
   Activity,
+  HelpCircle,
+  Lock,
   Pause,
   Play,
   Radio,
   Search,
   Sparkles,
+  Unlock,
   Wifi,
   WifiOff,
 } from 'lucide-react';
@@ -17,12 +20,16 @@ export const TopHudBar: React.FC = () => {
   const streamStatus = useCommandStore((s) => s.streamStatus);
   const latestLedger = useCommandStore((s) => s.ledgers[0]);
   const tpsEstimate = useCommandStore((s) => s.tpsEstimate);
+  const marketPrice = useCommandStore((s) => s.marketPrice);
+  const vaultStatus = useCommandStore((s) => s.vaultStatus);
   const paused = useCommandStore((s) => s.paused);
   const reducedMotion = useCommandStore((s) => s.reducedMotion);
   const togglePaused = useCommandStore((s) => s.togglePaused);
   const toggleReducedMotion = useCommandStore((s) => s.toggleReducedMotion);
   const connectNetwork = useCommandStore((s) => s.connectNetwork);
   const setCommandPaletteOpen = useCommandStore((s) => s.setCommandPaletteOpen);
+  const setActiveTab = useCommandStore((s) => s.setActiveTab);
+  const setQuickStartOpen = useCommandStore((s) => s.setQuickStartOpen);
 
   const [customUrlOpen, setCustomUrlOpen] = useState(false);
   const [customWsUrl, setCustomWsUrl] = useState('ws://127.0.0.1:6006/');
@@ -58,7 +65,7 @@ export const TopHudBar: React.FC = () => {
                 XRPL Command Center
               </span>
               <span className="px-1.5 py-0.5 rounded bg-cyan-500/15 border border-cyan-400/30 font-mono text-[10px] text-cyan-300">
-                v0.0.3-alpha
+                v0.1.0-beta
               </span>
             </div>
             <div className="text-[10px] font-mono text-slate-400 truncate max-w-[230px]">
@@ -158,20 +165,78 @@ export const TopHudBar: React.FC = () => {
             {latestLedger ? `${latestLedger.feeBaseDrops}d` : '10d'}
           </span>
         </div>
+
+        {marketPrice.xrpUsd !== null && (
+          <>
+            <div className="h-3.5 w-px bg-slate-800" />
+            <div
+              className="flex items-center gap-1.5"
+              title={`Live XRP/USD spot (${marketPrice.source})`}
+            >
+              <span className="text-slate-500 text-[10px]">XRP</span>
+              <span className="text-white font-semibold tabular-nums">
+                ${marketPrice.xrpUsd.toFixed(marketPrice.xrpUsd < 1 ? 4 : 2)}
+              </span>
+              {marketPrice.change24hPct !== null && (
+                <span
+                  className={`text-[10px] tabular-nums ${
+                    marketPrice.change24hPct >= 0 ? 'text-emerald-300' : 'text-rose-300'
+                  }`}
+                >
+                  {marketPrice.change24hPct >= 0 ? '+' : ''}
+                  {marketPrice.change24hPct.toFixed(1)}%
+                </span>
+              )}
+            </div>
+          </>
+        )}
       </div>
 
       {/* Right Action Controls */}
       <div className="flex items-center gap-2">
         <button
           type="button"
+          onClick={() => setActiveTab('wallets')}
+          title={
+            vaultStatus.unlocked
+              ? 'Rust Vault unlocked — click to manage wallets'
+              : vaultStatus.initialized
+                ? 'Vault locked — click to unlock'
+                : 'Initialize Rust-encrypted wallet vault'
+          }
+          className={`hidden xl:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border font-mono text-[11px] transition-colors ${
+            vaultStatus.unlocked
+              ? 'bg-emerald-500/15 border-emerald-400/40 text-emerald-200 hover:bg-emerald-500/25'
+              : 'bg-slate-950/90 border-slate-800 text-slate-400 hover:border-cyan-400/50 hover:text-slate-200'
+          }`}
+        >
+          {vaultStatus.unlocked ? (
+            <Unlock className="w-3.5 h-3.5 text-emerald-300" />
+          ) : (
+            <Lock className="w-3.5 h-3.5 text-slate-400" />
+          )}
+          <span>{vaultStatus.unlocked ? 'Vault Open' : 'Vault Locked'}</span>
+        </button>
+
+        <button
+          type="button"
           onClick={() => setCommandPaletteOpen(true)}
           className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-950/90 border border-slate-700/90 hover:border-cyan-400/60 text-xs text-slate-300 transition-colors"
         >
           <Search className="w-3.5 h-3.5 text-cyan-400" />
-          <span className="hidden sm:inline">Inspect Address / Tx / Ledger</span>
+          <span className="hidden sm:inline">Inspect</span>
           <kbd className="px-1.5 py-0.5 rounded bg-slate-800 text-[10px] font-mono text-slate-400">
             Ctrl+K
           </kbd>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setQuickStartOpen(true)}
+          title="Quick-Start Guide & 1-Click Testnet Playground"
+          className="p-2 rounded-lg border bg-slate-950/90 border-slate-800 text-slate-400 hover:border-cyan-400/50 hover:text-cyan-200 transition-colors"
+        >
+          <HelpCircle className="w-3.5 h-3.5" />
         </button>
 
         <button

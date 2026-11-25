@@ -7,6 +7,7 @@ import { LedgerRibbon } from './components/LedgerRibbon';
 import { LiveTxFeed } from './components/LiveTxFeed';
 import { NodeOpsDeck } from './components/NodeOpsDeck';
 import { PrimitivesDeck } from './components/PrimitivesDeck';
+import { QuickStartModal } from './components/QuickStartModal';
 import { SidebarNav } from './components/SidebarNav';
 import { TokenExplorer } from './components/TokenExplorer';
 import { TopHudBar } from './components/TopHudBar';
@@ -78,9 +79,16 @@ export const App: React.FC = () => {
     void store.refreshValidators();
     void store.refreshTokens();
     void store.refreshVaultStatus();
+    void store.refreshMarketPrice();
+    void store.refreshAmendments();
+
+    const priceTimer = setInterval(() => {
+      void useCommandStore.getState().refreshMarketPrice();
+    }, 60_000);
 
     return () => {
       clearInterval(flushTimer);
+      clearInterval(priceTimer);
       for (const u of unsubs) u();
     };
   }, []);
@@ -147,6 +155,7 @@ export const App: React.FC = () => {
       <InspectorDrawer />
       <CommandPalette />
       <TxConfirmModal />
+      <QuickStartModal />
     </div>
   );
 };

@@ -13,6 +13,7 @@ import {
 import { autoUpdater } from 'electron-updater';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { classicAddressToXAddress, xAddressToClassicAddress } from 'xrpl';
 import type {
   AssetSpec,
   DesktopNotificationPayload,
@@ -31,7 +32,7 @@ import { resolveRustSidecarBinaryPath, RustVaultSidecarClient } from './rustVaul
 import { WalletVaultService } from './walletVaultService';
 import { XrplStreamManager } from './xrplStream';
 
-const APP_VERSION = '0.0.3-alpha';
+const APP_VERSION = '0.1.0-beta';
 const LEDGER_USB_VENDOR_ID = 0x2c97;
 
 let mainWindow: BrowserWindow | null = null;
@@ -502,6 +503,176 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle('desktop:notify', (_evt, payload: DesktopNotificationPayload) => {
     showOsNotification(payload);
+  });
+
+  // v0.1.0-beta: Live Market Prices, Amendment Voting, X-Address Codec & Encrypted Vault Backups
+  ipcMain.handle('market:fetchPrices', () => directoryService.fetchMarketPrices());
+  ipcMain.handle('xrpl:fetchAmendments', () => directoryService.fetchAmendments(streamManager));
+
+  ipcMain.handle('wallet:decodeXAddress', (_evt, xAddr: string) => {
+    try {
+      const decoded = xAddressToClassicAddress(String(xAddr ?? '').trim());
+      return {
+        ok: true,
+        classicAddress: decoded.classicAddress,
+        tag: decoded.tag === false ? null : Number(decoded.tag),
+        test: Boolean(decoded.test),
+      };
+    } catch (err) {
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : 'Invalid XRPL X-Address',
+      };
+    }
+  });
+
+  ipcMain.handle(
+    'wallet:encodeXAddress',
+    (_evt, classicAddress: string, tag?: number | null, isTestnet = false) => {
+      try {
+        const cleanTag = tag === null || tag === undefined ? false : Number(tag);
+        const xAddress = classicAddressToXAddress(String(classicAddress ?? '').trim(), cleanTag, Boolean(isTestnet));
+        return { ok: true, xAddress };
+      } catch (err) {
+        return {
+          ok: false,
+          error: err instanceof Error ? err.message : 'Unable to encode X-Address',
+        };
+      }
+    }
+  );
+
+  ipcMain.handle('wallet:exportBackup', async () => {
+    try {
+      const userDataDir = app.getPath('userData');
+      const rustPath = path.join(userDataDir, 'wallet-vault-rust.enc.json');
+      const nodePath = path.join(userDataDir, 'wallet-vault.enc.json');
+
+      let sourceFile: string | null = null;
+      let engine: 'rust-sidecar' | 'node-fallback' = 'rust-sidecar';
+      try {
+        await fs.access(rustPath);
+        sourceFile = rustPath;
+        engine = 'rust-sidecar';
+      } catch {
+        try {
+          await fs.access(nodePath);
+          sourceFile = nodePath;
+          engine = 'node-fallback';
+        } catch {
+          return {
+            ok: false,
+            error: 'No encrypted vault file exists yet. Initialize your vault first.',
+          };
+        }
+      }
+
+      const rawEncrypted = await fs.readFile(sourceFile, 'utf8');
+      const parsedVault = JSON.parse(rawEncrypted) as Record<string, unknown>;
+      const envelope = {
+        format: 'xrpl-command-center-encrypted-vault-v1',
+        exportedAt: new Date().toISOString(),
+        appVersion: APP_VERSION,
+        engine,
+        encryptedVault: parsedVault,
+      };
+
+      const defaultName = `xrpl-vault-backup-${new Date().toISOString().slice(0, 10)}.xrplvault`;
+      const picked = await dialog.showSaveDialog({
+        title: 'Export Encrypted XRPL Vault Backup (.xrplvault)',
+        defaultPath: path.join(app.getPath('documents'), defaultName),
+        filters: [{ name: 'Encrypted XRPL Vault', extensions: ['xrplvault', 'json'] }],
+      });
+
+      if (picked.canceled || !picked.filePath) {
+        return { ok: false, cancelled: true };
+      }
+
+      await fs.writeFile(picked.filePath, JSON.stringify(envelope, null, 2), {
+        encoding: 'utf8',
+        mode: 0o600,
+      });
+
+      return {
+        ok: true,
+        filePath: picked.filePath,
+        message: 'Encrypted vault backup exported (Argon2id + AES-256-GCM ciphertext only — no plaintext seeds).',
+      };
+    } catch (err) {
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : 'Unable to export encrypted vault backup.',
+      };
+    }
+  });
+
+  ipcMain.handle('wallet:importBackup', async () => {
+    try {
+      const picked = await dialog.showOpenDialog({
+        title: 'Restore Encrypted XRPL Vault Backup (.xrplvault)',
+        properties: ['openFile'],
+        filters: [{ name: 'Encrypted XRPL Vault', extensions: ['xrplvault', 'json'] }],
+      });
+      if (picked.canceled || picked.filePaths.length === 0) {
+        return { ok: false, cancelled: true };
+      }
+
+      const rawText = await fs.readFile(picked.filePaths[0], 'utf8');
+      const envelope = JSON.parse(rawText) as {
+        format?: string;
+        engine?: 'rust-sidecar' | 'node-fallback';
+        encryptedVault?: Record<string, unknown>;
+      };
+
+      if (
+        envelope.format !== 'xrpl-command-center-encrypted-vault-v1' ||
+        !envelope.encryptedVault ||
+        typeof envelope.encryptedVault !== 'object'
+      ) {
+        return {
+          ok: false,
+          error: 'Invalid .xrplvault backup file format.',
+        };
+      }
+
+      const userDataDir = app.getPath('userData');
+      const targetName =
+        envelope.engine === 'node-fallback' ? 'wallet-vault.enc.json' : 'wallet-vault-rust.enc.json';
+      const targetPath = path.join(userDataDir, targetName);
+
+      // Lock active vault & back up existing vault file before overwriting
+      walletVault.lock();
+      try {
+        await fs.access(targetPath);
+        await fs.copyFile(targetPath, `${targetPath}.bak-${Date.now()}`);
+      } catch {
+        // no existing vault to back up
+      }
+
+      await fs.writeFile(targetPath, JSON.stringify(envelope.encryptedVault, null, 2), {
+        encoding: 'utf8',
+        mode: 0o600,
+      });
+
+      // Restart Rust sidecar so it reloads the restored encrypted vault cleanly
+      if (rustSidecar) {
+        rustSidecar.shutdown();
+        rustSidecar.start();
+      }
+
+      const status = await walletVault.getStatus();
+      return {
+        ok: true,
+        filePath: picked.filePaths[0],
+        status,
+        message: 'Encrypted vault restored! Unlock it with your backup master passphrase.',
+      };
+    } catch (err) {
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : 'Unable to restore encrypted vault backup.',
+      };
+    }
   });
 }
 

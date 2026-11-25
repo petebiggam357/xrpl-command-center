@@ -1,9 +1,12 @@
 import { create } from 'zustand';
 import type {
+  AddressBookContact,
+  AmendmentVoteRecord,
   ConsensusPhase,
   InspectorResult,
   LedgerSnapshot,
   LiveTransaction,
+  MarketPriceSnapshot,
   NetworkId,
   NodeConnectionConfig,
   NodeOpsSnapshot,
@@ -21,6 +24,7 @@ import type {
   WalletTxIntent,
   WatchlistEntry,
 } from '../shared/types';
+import { DEFAULT_ADDRESS_BOOK_CONTACTS } from '../shared/betaUtils';
 import { getXrplBridge } from '../services/xrplBridge';
 
 export type NavTab =
@@ -39,6 +43,40 @@ const MAX_PULSES = 90;
 
 const WATCHLIST_STORAGE_KEY = 'xrpl-cc-watchlist-v1';
 const NODE_CONFIG_STORAGE_KEY = 'xrpl-cc-nodeops-v1';
+const CONTACTS_STORAGE_KEY = 'xrpl-cc-contacts-v1';
+const WHALE_THRESHOLD_STORAGE_KEY = 'xrpl-cc-whale-threshold-v1';
+const QUICKSTART_SEEN_KEY = 'xrpl-cc-quickstart-seen-v1';
+
+function loadSavedContacts(): AddressBookContact[] {
+  try {
+    const raw = localStorage.getItem(CONTACTS_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as AddressBookContact[];
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch {
+    // ignore
+  }
+  return DEFAULT_ADDRESS_BOOK_CONTACTS;
+}
+
+function loadWhaleThreshold(): number {
+  try {
+    const raw = Number(localStorage.getItem(WHALE_THRESHOLD_STORAGE_KEY));
+    if (Number.isFinite(raw) && raw >= 100) return raw;
+  } catch {
+    // ignore
+  }
+  return 100_000;
+}
+
+function loadQuickStartInitialOpen(): boolean {
+  try {
+    return localStorage.getItem(QUICKSTART_SEEN_KEY) !== '1';
+  } catch {
+    return false;
+  }
+}
 
 function loadSavedWatchlist(): WatchlistEntry[] {
   try {
@@ -137,6 +175,15 @@ interface CommandState {
   watchlist: WatchlistEntry[];
   alerts: Array<{ id: string; title: string; detail: string; timestamp: number }>;
 
+  // v0.1.0-beta: Address Book, Market Prices, Amendments, Whale Radar & Quick-Start
+  contacts: AddressBookContact[];
+  marketPrice: MarketPriceSnapshot;
+  amendments: AmendmentVoteRecord[];
+  amendmentsSource: string;
+  amendmentsLoading: boolean;
+  whaleThresholdXrp: number;
+  quickStartOpen: boolean;
+
   // Actions
   setActiveTab: (tab: NavTab) => void;
   togglePaused: () => void;
@@ -172,6 +219,15 @@ interface CommandState {
   refreshNodeLogs: () => Promise<void>;
   addWatchlistEntry: (entry: Omit<WatchlistEntry, 'id' | 'createdAt'>) => void;
   removeWatchlistEntry: (id: string) => void;
+
+  // v0.1.0-beta Actions
+  addContact: (contact: Omit<AddressBookContact, 'id' | 'createdAt'>) => void;
+  removeContact: (id: string) => void;
+  refreshMarketPrice: () => Promise<void>;
+  refreshAmendments: () => Promise<void>;
+  setWhaleThresholdXrp: (threshold: number) => void;
+  setQuickStartOpen: (open: boolean) => void;
+  dismissQuickStart: () => void;
 }
 
 const initialCounts: Record<TxCategory, number> = {
@@ -253,6 +309,19 @@ export const useCommandStore = create<CommandState>((set, get) => ({
 
   watchlist: loadSavedWatchlist(),
   alerts: [],
+
+  contacts: loadSavedContacts(),
+  marketPrice: {
+    xrpUsd: null,
+    change24hPct: null,
+    source: '',
+    fetchedAt: 0,
+  },
+  amendments: [],
+  amendmentsSource: '',
+  amendmentsLoading: false,
+  whaleThresholdXrp: loadWhaleThreshold(),
+  quickStartOpen: loadQuickStartInitialOpen(),
 
   setActiveTab: (tab) => set({ activeTab: tab }),
   togglePaused: () => set((s) => ({ paused: !s.paused })),
@@ -655,4 +724,81 @@ export const useCommandStore = create<CommandState>((set, get) => ({
       }
       return { watchlist: next };
     }),
+
+  addContact: (contact) =>
+    set((s) => {
+      const cleanAddr = contact.address.trim();
+      const filtered = s.contacts.filter((c) => c.address !== cleanAddr);
+      const next: AddressBookContact[] = [
+        {
+          ...contact,
+          address: cleanAddr,
+          label: contact.label.trim() || cleanAddr.slice(0, 10),
+          id: `c-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          createdAt: Date.now(),
+        },
+        ...filtered,
+      ];
+      try {
+        localStorage.setItem(CONTACTS_STORAGE_KEY, JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return { contacts: next };
+    }),
+
+  removeContact: (id) =>
+    set((s) => {
+      const next = s.contacts.filter((c) => c.id !== id);
+      try {
+        localStorage.setItem(CONTACTS_STORAGE_KEY, JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return { contacts: next };
+    }),
+
+  refreshMarketPrice: async () => {
+    try {
+      const snap = await getXrplBridge().fetchMarketPrices();
+      set({ marketPrice: snap });
+    } catch {
+      // non-fatal
+    }
+  },
+
+  refreshAmendments: async () => {
+    set({ amendmentsLoading: true });
+    try {
+      const res = await getXrplBridge().fetchAmendments();
+      set({
+        amendments: res.amendments,
+        amendmentsSource: res.source,
+        amendmentsLoading: false,
+      });
+    } catch {
+      set({ amendmentsLoading: false });
+    }
+  },
+
+  setWhaleThresholdXrp: (threshold) => {
+    const clean = Math.max(100, Math.round(Number(threshold) || 100_000));
+    try {
+      localStorage.setItem(WHALE_THRESHOLD_STORAGE_KEY, String(clean));
+    } catch {
+      // ignore
+    }
+    set({ whaleThresholdXrp: clean });
+  },
+
+  setQuickStartOpen: (open) => set({ quickStartOpen: open }),
+
+  dismissQuickStart: () => {
+    try {
+      localStorage.setItem(QUICKSTART_SEEN_KEY, '1');
+    } catch {
+      // ignore
+    }
+    set({ quickStartOpen: false });
+  },
 }));

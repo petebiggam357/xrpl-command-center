@@ -444,21 +444,37 @@ export function getXrplBridge(): Omit<XrplDesktopApi, 'isElectron' | 'platform' 
     systemGetTrayUpdaterState: async (): Promise<TrayAndUpdaterSettings> => ({
       minimizeToTray: false,
       nodeWatchdogEnabled: false,
-      currentVersion: '0.0.2-alpha',
+      currentVersion: '0.1.0-beta',
       updateState: 'idle',
     }),
     systemUpdateTraySettings: async () => ({
       minimizeToTray: false,
       nodeWatchdogEnabled: false,
-      currentVersion: '0.0.2-alpha',
+      currentVersion: '0.1.0-beta',
       updateState: 'idle',
     }),
     systemCheckForUpdates: async () => ({
       minimizeToTray: false,
       nodeWatchdogEnabled: false,
-      currentVersion: '0.0.2-alpha',
+      currentVersion: '0.1.0-beta',
       updateState: 'idle',
     }),
+
+    fetchMarketPrices: async () => ({
+      xrpUsd: null,
+      change24hPct: null,
+      source: 'browser-preview',
+      fetchedAt: Date.now(),
+    }),
+    fetchAmendments: async () => ({
+      amendments: [],
+      source: 'browser-preview',
+      fetchedAt: Date.now(),
+    }),
+    decodeXAddress: async () => ({ ok: false, error: 'Desktop Electron mode required.' }),
+    encodeXAddress: async () => ({ ok: false, error: 'Desktop Electron mode required.' }),
+    walletExportBackup: desktopOnlyErr,
+    walletImportBackup: desktopOnlyErr,
 
     notifyDesktop: (_p: DesktopNotificationPayload) => Promise.resolve(),
     onStreamStatus: (cb) => fb.onStreamStatus(cb),

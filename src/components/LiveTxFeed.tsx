@@ -1,12 +1,16 @@
 import React, { useMemo, useState } from 'react';
 import { Flame, Waves } from 'lucide-react';
+import { resolveAddressLabel } from '../shared/betaUtils';
 import { TX_CATEGORY_META } from '../shared/networks';
 import type { TxCategory } from '../shared/types';
 import { shortenAddress } from '../shared/xrplCodec';
 import { useCommandStore } from '../store/useCommandStore';
 
-const FILTER_OPTIONS: Array<{ id: 'all' | TxCategory; label: string }> = [
+type FeedFilter = 'all' | 'whales' | TxCategory;
+
+const FILTER_OPTIONS: Array<{ id: FeedFilter; label: string }> = [
   { id: 'all', label: 'All Flow' },
+  { id: 'whales', label: 'Whale Radar' },
   { id: 'payment', label: 'XRP' },
   { id: 'token', label: 'Tokens' },
   { id: 'dex', label: 'DEX' },
@@ -19,12 +23,27 @@ export const LiveTxFeed: React.FC = React.memo(() => {
   const transactions = useCommandStore((s) => s.transactions);
   const txCategoryCounts = useCommandStore((s) => s.txCategoryCounts);
   const inspectLiveTransaction = useCommandStore((s) => s.inspectLiveTransaction);
-  const [filter, setFilter] = useState<'all' | TxCategory>('all');
+  const contacts = useCommandStore((s) => s.contacts);
+  const vaultAccounts = useCommandStore((s) => s.vaultStatus.accounts);
+  const whaleThresholdXrp = useCommandStore((s) => s.whaleThresholdXrp);
+  const setWhaleThresholdXrp = useCommandStore((s) => s.setWhaleThresholdXrp);
+  const [filter, setFilter] = useState<FeedFilter>('all');
 
   const visible = useMemo(() => {
     if (filter === 'all') return transactions.slice(0, 45);
+    if (filter === 'whales') {
+      return transactions
+        .filter((t) => t.amountXrpEstimate >= whaleThresholdXrp || t.isWhale)
+        .slice(0, 45);
+    }
     return transactions.filter((t) => t.category === filter).slice(0, 45);
-  }, [transactions, filter]);
+  }, [transactions, filter, whaleThresholdXrp]);
+
+  const formatLabeledAddr = (addr?: string) => {
+    if (!addr) return '';
+    const match = resolveAddressLabel(addr, contacts, vaultAccounts);
+    return match ? match.label : shortenAddress(addr, 6, 4);
+  };
 
   return (
     <div className="hud-panel rounded-xl p-4 flex flex-col">
@@ -38,7 +57,8 @@ export const LiveTxFeed: React.FC = React.memo(() => {
 
         <div className="flex flex-wrap items-center gap-1.5">
           {FILTER_OPTIONS.map((opt) => {
-            const count = opt.id === 'all' ? undefined : txCategoryCounts[opt.id];
+            const count =
+              opt.id === 'all' || opt.id === 'whales' ? undefined : txCategoryCounts[opt.id];
             return (
               <button
                 key={opt.id}
@@ -46,7 +66,9 @@ export const LiveTxFeed: React.FC = React.memo(() => {
                 onClick={() => setFilter(opt.id)}
                 className={`px-2 py-1 rounded-lg text-[11px] font-mono border transition-colors ${
                   filter === opt.id
-                    ? 'bg-cyan-500/20 border-cyan-400/50 text-cyan-200'
+                    ? opt.id === 'whales'
+                      ? 'bg-amber-500/20 border-amber-400/50 text-amber-200'
+                      : 'bg-cyan-500/20 border-cyan-400/50 text-cyan-200'
                     : 'bg-slate-950/80 border-slate-800 text-slate-400 hover:text-slate-200'
                 }`}
               >
@@ -55,6 +77,19 @@ export const LiveTxFeed: React.FC = React.memo(() => {
               </button>
             );
           })}
+          {filter === 'whales' && (
+            <select
+              aria-label="Whale threshold"
+              value={whaleThresholdXrp}
+              onChange={(e) => setWhaleThresholdXrp(Number(e.target.value))}
+              className="px-2 py-1 rounded-lg bg-slate-950 border border-amber-400/40 text-[11px] font-mono text-amber-200"
+            >
+              <option value={10_000}>≥ 10K XRP</option>
+              <option value={50_000}>≥ 50K XRP</option>
+              <option value={100_000}>≥ 100K XRP</option>
+              <option value={500_000}>≥ 500K XRP</option>
+            </select>
+          )}
         </div>
       </div>
 
@@ -101,8 +136,8 @@ export const LiveTxFeed: React.FC = React.memo(() => {
                       {tx.amountDisplay}
                     </td>
                     <td className="py-1.5 px-2 text-slate-400">
-                      {shortenAddress(tx.account, 6, 4)}
-                      {tx.destination ? ` → ${shortenAddress(tx.destination, 6, 4)}` : ''}
+                      {formatLabeledAddr(tx.account)}
+                      {tx.destination ? ` → ${formatLabeledAddr(tx.destination)}` : ''}
                     </td>
                     <td className="py-1.5 px-2 text-right text-slate-400 tabular-nums">
                       {tx.feeDrops}d

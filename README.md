@@ -6,7 +6,7 @@
 
 **Real-Time Cross-Platform XRP Ledger Telemetry, 3D Consensus Globe, Encrypted Multi-Wallet & Pro DeFi Studio, Institutional Primitives (`MPT`/`Oracle`/`DID`), 1-Click Docker Node Manager & SQLite Analytics**
 
-[![Version](https://img.shields.io/badge/version-v0.0.3--alpha-22d3ee?style=flat-square)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v0.1.0--beta-22d3ee?style=flat-square)](CHANGELOG.md)
 [![Platforms](https://img.shields.io/badge/platforms-AppImage%20%7C%20exe%20%7C%20dmg-34d399?style=flat-square)](#cross-platform-packaging)
 [![Security](https://img.shields.io/badge/vault-Rust%20Argon2id%20%2B%20Zeroize%20%2B%20Ledger%20USB-a78bfa?style=flat-square)](#security--vault-architecture)
 [![License](https://img.shields.io/badge/license-MIT-64748b?style=flat-square)](LICENSE)
@@ -25,11 +25,11 @@
 
 | Module | What You See & Control |
 | :--- | :--- |
-| **Command Deck** | 60fps HTML5 Canvas **Live Consensus Core** (`OPEN → ESTABLISH → 80% QUORUM → VALIDATED`), 6-lane **Transaction Particle River**, whale shockwaves, scrolling **Validated Ledger Chain**, and click-to-inspect live transaction tape. |
+| **Command Deck** | 60fps delta-time HTML5 Canvas **Live Consensus Core** (`OPEN → ESTABLISH → 80% QUORUM → VALIDATED`), 6-lane **Transaction Particle River**, **Whale Radar**, scrolling **Validated Ledger Chain**, live **XRP/USD HUD Ticker**, and click-to-inspect live transaction tape with human-readable contact labels. |
 | **3D Holographic Globe** | Interactive **Three.js WebGL2** validator & peer topology globe with drag-to-orbit, zoom, and live geodesic arcs pulsing on consensus & transaction activity. |
-| **Validator Constellation** | Live XRPLF Validator History Service (`data.xrplf.org`) metrics, UNL filters, 1h / 24h / 30d agreement scores, `rippled` version breakdown, and live `validationReceived` vote pulses. |
+| **Validator Constellation** | Live XRPLF Validator History Service (`data.xrplf.org`) metrics, UNL filters, 1h / 24h / 30d agreement scores, `rippled` version breakdown, live `validationReceived` vote pulses, and **XRPL Amendment Voting Radar** (80% activation progress). |
 | **Tokens, DEX & AMM Explorer** | Global XRPL token index (`s1.xrplmeta.org`) + live-stream discovery + **authoritative on-ledger verification** (`account_info`, `gateway_balances`, `book_offers`, `amm_info`), issuer risk flags (`Blackholed`, `GlobalFreeze`, `NoFreeze`, `Clawback`), and **60fps CLOB Depth Wall + AMM `x·y=k` Curve Canvas**. |
-| **Wallets & Pro DeFi Studio** | Passphrase-encrypted (`scrypt` + `AES-256-GCM` + OS Keyring) vault, **Ledger USB (WebHID)**, **Air-Gapped QR & Signed Blob Broadcaster**, **Native Multi-Sign (`SignerListSet` + `xrpl.multisign`)**, **Smart Auto-Bridging Pathfinding Swap (`ripple_path_find` + `DeliverMin`)**, `OfferCreate`/`Cancel`, `AMMCreate`/`AMMVote`/`Deposit`/`Withdraw`, Escrows, Checks, XLS-20 NFTs, and Testnet/Devnet Faucet. |
+| **Wallets & Pro DeFi Studio** | Process-isolated **Rust Argon2id + AES-256-GCM + Zeroize Vault**, 1-click encrypted **`.xrplvault` Backup/Restore**, **Smart Address Book & Exchange Destination-Tag Guard**, **X-Address decode**, live **USD Portfolio & Reserve Meter**, searchable **Tx History + UTF-8 Memo Decoder**, **Visual NFT Gallery**, **Ledger USB (WebHID)**, **Air-Gapped QR**, **Native Multi-Sign**, **Smart Pathfinding Swap**, `OfferCreate`/`Cancel`, `AMMCreate`/`AMMVote`/`Deposit`/`Withdraw`, Escrows, Checks, and **1-Click Testnet Playground**. |
 | **Institutional Studio** | Issue **Multi-Purpose Tokens (`MPTokenIssuanceCreate`, `MPTokenAuthorize`)**, manage regulated **`Clawback` (`XLS-39`)**, generate & lint **`xrp-ledger.toml`** with 1-click `AccountSet` domain linking, query & publish **XLS-47 Price Oracles (`get_aggregate_price` / `OracleSet`)**, and resolve/anchor **XLS-40 W3C DIDs (`DIDSet`)**. |
 | **My Node Ops & Docker** | **1-Click Cross-Platform Docker `xrpld` Launcher** (Mainnet/Testnet/Devnet, loopback-only admin `127.0.0.1:5005`), **Visual `rippled.cfg` & `validators.txt` Diff Studio** with timestamped `.bak` auto-backups, SSH-tunneled admin telemetry (`peers`, `feature`, `can_delete`), local `debug.log` tailer, and confirmation-gated admin RPCs. |
 | **Analytics, Tray & Updater** | Embedded **WebAssembly SQLite (`command-center.sqlite`)** recording ledger throughput & tracked wallet transaction journals, **1-click CSV accounting export**, **OS System Tray Mode**, **30s Background Node Watchdog**, and `electron-updater` release checks. |

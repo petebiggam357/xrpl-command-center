@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { CheckCircle2, RefreshCw, Search, ShieldCheck, Zap } from 'lucide-react';
+import { CheckCircle2, RefreshCw, Search, ShieldCheck, Vote, Zap } from 'lucide-react';
 import { shortenAddress } from '../shared/xrplCodec';
 import { useCommandStore } from '../store/useCommandStore';
 
@@ -10,9 +10,23 @@ export const ValidatorDeck: React.FC = () => {
   const refreshValidators = useCommandStore((s) => s.refreshValidators);
   const validatorLastSeen = useCommandStore((s) => s.validatorLastSeen);
   const recentValidations = useCommandStore((s) => s.recentValidations);
+  const amendments = useCommandStore((s) => s.amendments);
+  const amendmentsSource = useCommandStore((s) => s.amendmentsSource);
+  const amendmentsLoading = useCommandStore((s) => s.amendmentsLoading);
+  const refreshAmendments = useCommandStore((s) => s.refreshAmendments);
 
   const [query, setQuery] = useState('');
   const [unlOnly, setUnlOnly] = useState(true);
+  const [showEnabledAmendments, setShowEnabledAmendments] = useState(false);
+
+  const pendingAmendments = useMemo(
+    () => amendments.filter((a) => !a.enabled && !a.vetoed).slice(0, 16),
+    [amendments]
+  );
+  const enabledAmendments = useMemo(
+    () => amendments.filter((a) => a.enabled).slice(0, 24),
+    [amendments]
+  );
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -252,6 +266,110 @@ export const ValidatorDeck: React.FC = () => {
             </tbody>
           </table>
         </div>
+      </div>
+
+      {/* Live XRPL Amendment Voting Radar */}
+      <div className="hud-panel rounded-xl p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+          <div className="flex items-center gap-2">
+            <Vote className="w-4 h-4 text-violet-400" />
+            <h2 className="text-xs font-semibold uppercase tracking-[0.16em] text-violet-300">
+              XRPL Protocol Amendment Voting Radar
+            </h2>
+            {amendmentsSource && (
+              <span className="px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-[10px] font-mono text-slate-400">
+                {amendmentsSource}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShowEnabledAmendments((v) => !v)}
+              className={`px-2.5 py-1 rounded-lg text-[11px] font-mono border ${
+                showEnabledAmendments
+                  ? 'bg-emerald-500/15 border-emerald-400/40 text-emerald-200'
+                  : 'bg-slate-950 border-slate-800 text-slate-300'
+              }`}
+            >
+              {showEnabledAmendments
+                ? `Enabled (${enabledAmendments.length})`
+                : `Voting / Pending (${pendingAmendments.length})`}
+            </button>
+            <button
+              type="button"
+              onClick={() => void refreshAmendments()}
+              className="p-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-300 hover:border-violet-400/50"
+              title="Refresh amendment voting telemetry"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${amendmentsLoading ? 'animate-spin text-violet-300' : ''}`} />
+            </button>
+          </div>
+        </div>
+
+        {(showEnabledAmendments ? enabledAmendments : pendingAmendments).length === 0 ? (
+          <div className="text-xs font-mono text-slate-500 py-6 text-center">
+            {amendmentsLoading
+              ? 'Querying XRPL amendment voting status...'
+              : 'No amendment telemetry returned from current node yet.'}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2.5">
+            {(showEnabledAmendments ? enabledAmendments : pendingAmendments).map((am) => {
+              const nearQuorum = !am.enabled && am.percent >= 80;
+              return (
+                <div
+                  key={am.id}
+                  className="rounded-xl bg-slate-950/80 border border-slate-800 p-3 font-mono"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-semibold text-white truncate" title={am.name}>
+                      {am.name}
+                    </span>
+                    <span
+                      className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] ${
+                        am.enabled
+                          ? 'bg-emerald-500/15 text-emerald-300'
+                          : nearQuorum
+                            ? 'bg-amber-500/20 text-amber-200'
+                            : 'bg-violet-500/15 text-violet-200'
+                      }`}
+                    >
+                      {am.enabled ? 'ENABLED' : `${am.percent.toFixed(0)}%`}
+                    </span>
+                  </div>
+                  <div className="mt-2 h-1.5 rounded-full bg-slate-800 overflow-hidden relative">
+                    <div
+                      className={`h-full transition-all ${
+                        am.enabled
+                          ? 'bg-emerald-400'
+                          : nearQuorum
+                            ? 'bg-amber-400'
+                            : 'bg-violet-400'
+                      }`}
+                      style={{ width: `${Math.min(100, Math.max(4, am.percent))}%` }}
+                    />
+                    {!am.enabled && (
+                      <div
+                        className="absolute top-0 bottom-0 w-0.5 bg-emerald-300/80"
+                        style={{ left: '80%' }}
+                        title="80% Supermajority Activation Threshold"
+                      />
+                    )}
+                  </div>
+                  <div className="mt-1.5 flex items-center justify-between text-[10px] text-slate-400">
+                    <span>
+                      {am.enabled
+                        ? 'Active on ledger'
+                        : `${am.count} / ${am.threshold} UNL votes (80% req)`}
+                    </span>
+                    <span className="text-slate-500">{am.id.slice(0, 8)}…</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
