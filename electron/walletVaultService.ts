@@ -749,12 +749,24 @@ export class WalletVaultService {
   private activePassphraseKey: Buffer | null = null;
   private activeSalt: Buffer | null = null;
   private autoLockTimer: NodeJS.Timeout | null = null;
+  private trackedAddresses = new Set<string>();
 
   constructor(
     private readonly storageDir: string,
     private readonly osCipher?: OsCipherAdapter,
     private readonly rustSidecar?: RustVaultSidecarClient | null
   ) {}
+
+  private syncTrackedAddresses(accounts: WalletAccountPublic[]): void {
+    this.trackedAddresses.clear();
+    for (const acct of accounts) {
+      if (acct.address) this.trackedAddresses.add(acct.address);
+    }
+  }
+
+  public isTrackedAddress(address?: string): boolean {
+    return Boolean(address && this.trackedAddresses.has(address));
+  }
 
   private get vaultPath(): string {
     return path.join(this.storageDir, VAULT_FILENAME);
@@ -900,9 +912,12 @@ export class WalletVaultService {
 
   public async getStatus(): Promise<VaultStatus> {
     if (this.rustSidecar) {
-      return this.rustSidecar.getStatus();
+      const st = await this.rustSidecar.getStatus();
+      this.syncTrackedAddresses(st.accounts);
+      return st;
     }
     const disk = await this.loadDiskFile();
+    this.syncTrackedAddresses(disk.accounts);
     return {
       initialized: disk.vaultInitialized,
       unlocked: this.unlockedSeeds !== null,
@@ -917,6 +932,7 @@ export class WalletVaultService {
     if (this.rustSidecar) {
       try {
         const status = await this.rustSidecar.setupVault(passphrase);
+        this.syncTrackedAddresses(status.accounts);
         this.touchAutoLock();
         return { ok: true, status };
       } catch (err) {
@@ -1020,6 +1036,7 @@ export class WalletVaultService {
       try {
         this.touchAutoLock();
         const created = await this.rustSidecar.createWallet(label, algorithm);
+        if (created.status) this.syncTrackedAddresses(created.status.accounts);
         return { ok: true, ...created };
       } catch (err) {
         return { ok: false, error: err instanceof Error ? err.message : 'Rust wallet creation failed' };
@@ -1067,6 +1084,7 @@ export class WalletVaultService {
       try {
         this.touchAutoLock();
         const res = await this.rustSidecar.importSeed(label, seedInput);
+        if (res.status) this.syncTrackedAddresses(res.status.accounts);
         return { ok: true, ...res };
       } catch (err) {
         return { ok: false, error: err instanceof Error ? err.message : 'Rust seed import failed' };
@@ -1123,6 +1141,7 @@ export class WalletVaultService {
     if (this.rustSidecar) {
       try {
         const res = await this.rustSidecar.addWatchOnly(label, addr, isHardwareLedger, derivationPath);
+        if (res.status) this.syncTrackedAddresses(res.status.accounts);
         return { ok: true, ...res };
       } catch (err) {
         return { ok: false, error: err instanceof Error ? err.message : 'Unable to add watch account' };

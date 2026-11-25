@@ -15,7 +15,9 @@ import { TxParticleRiver } from './components/TxParticleRiver';
 import { ValidatorDeck } from './components/ValidatorDeck';
 import { ValidatorGlobe3D } from './components/ValidatorGlobe3D';
 import { WalletDeck } from './components/WalletDeck';
+import { emitVisualLedgerPulse, emitVisualTx } from './services/streamVisualBus';
 import { getXrplBridge } from './services/xrplBridge';
+import type { LiveTransaction, ValidationPulse } from './shared/types';
 import { useCommandStore } from './store/useCommandStore';
 
 export const App: React.FC = () => {
@@ -26,11 +28,43 @@ export const App: React.FC = () => {
     const bridge = getXrplBridge();
     const store = useCommandStore.getState();
 
+    // Batch high-frequency stream events into Zustand at ~6.5 Hz so React DOM diffing
+    // never starves 60fps Canvas animations, while feeding canvases immediately via visual bus.
+    let pendingTxs: LiveTransaction[] = [];
+    let pendingVals: ValidationPulse[] = [];
+
+    const flushTimer = setInterval(() => {
+      if (pendingTxs.length > 0) {
+        const batch = pendingTxs;
+        pendingTxs = [];
+        useCommandStore.getState().ingestTransactionBatch(batch);
+      }
+      if (pendingVals.length > 0) {
+        const batch = pendingVals;
+        pendingVals = [];
+        useCommandStore.getState().ingestValidationBatch(batch);
+      }
+    }, 150);
+
     const unsubs = [
       bridge.onStreamStatus((st) => useCommandStore.getState().ingestStreamStatus(st)),
-      bridge.onLedgerClosed((l) => useCommandStore.getState().ingestLedger(l)),
-      bridge.onTransaction((tx) => useCommandStore.getState().ingestTransaction(tx)),
-      bridge.onValidation((v) => useCommandStore.getState().ingestValidation(v)),
+      bridge.onLedgerClosed((l) => {
+        emitVisualLedgerPulse();
+        useCommandStore.getState().ingestLedger(l);
+      }),
+      bridge.onTransaction((tx) => {
+        emitVisualTx(tx);
+        pendingTxs.push(tx);
+        if (pendingTxs.length > 250) {
+          pendingTxs.splice(0, pendingTxs.length - 250);
+        }
+      }),
+      bridge.onValidation((v) => {
+        pendingVals.push(v);
+        if (pendingVals.length > 120) {
+          pendingVals.splice(0, pendingVals.length - 120);
+        }
+      }),
       bridge.onConsensusPhase((p) => useCommandStore.getState().ingestConsensusPhase(p)),
     ];
 
@@ -46,6 +80,7 @@ export const App: React.FC = () => {
     void store.refreshVaultStatus();
 
     return () => {
+      clearInterval(flushTimer);
       for (const u of unsubs) u();
     };
   }, []);

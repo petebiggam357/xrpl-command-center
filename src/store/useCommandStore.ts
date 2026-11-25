@@ -146,7 +146,9 @@ interface CommandState {
   ingestStreamStatus: (status: StreamStatus) => void;
   ingestLedger: (ledger: LedgerSnapshot) => void;
   ingestTransaction: (tx: LiveTransaction) => void;
+  ingestTransactionBatch: (txs: LiveTransaction[]) => void;
   ingestValidation: (pulse: ValidationPulse) => void;
+  ingestValidationBatch: (pulses: ValidationPulse[]) => void;
   ingestConsensusPhase: (phase: ConsensusPhase) => void;
   refreshValidators: () => Promise<void>;
   refreshTokens: () => Promise<void>;
@@ -295,54 +297,74 @@ export const useCommandStore = create<CommandState>((set, get) => ({
     }),
 
   ingestTransaction: (tx) => {
+    get().ingestTransactionBatch([tx]);
+  },
+
+  ingestTransactionBatch: (txs) => {
+    if (txs.length === 0) return;
     const state = get();
     const now = Date.now();
     const cutoff = now - 10_000;
 
-    // Auto-refresh wallet portfolio if an incoming validated tx touches the selected wallet
     const selectedAddr = state.vaultStatus.accounts.find((a) => a.id === state.selectedWalletId)?.address;
-    if (tx.validated && selectedAddr && (tx.account === selectedAddr || tx.destination === selectedAddr)) {
-      void get().refreshWalletPortfolio();
-    }
+    let shouldRefreshPortfolio = false;
+    const newAlerts: Array<{ id: string; title: string; detail: string; timestamp: number }> = [];
 
-    for (const item of state.watchlist) {
-      const target = item.target.trim();
-      const matchedAccount =
-        item.type === 'account' && (tx.account === target || tx.destination === target || tx.issuer === target);
-      const matchedToken =
-        item.type === 'token' &&
-        (tx.currency?.toUpperCase() === target.toUpperCase() || tx.issuer === target);
+    for (const tx of txs) {
+      if (tx.validated && selectedAddr && (tx.account === selectedAddr || tx.destination === selectedAddr)) {
+        shouldRefreshPortfolio = true;
+      }
 
-      if (matchedAccount || matchedToken) {
-        const meetsMin = !item.minXrpAlert || tx.amountXrpEstimate >= item.minXrpAlert || item.type === 'token';
-        if (meetsMin) {
-          const title = `Watchlist Hit: ${item.label}`;
-          const detail = `${tx.txType} • ${tx.amountDisplay}`;
-          set((s) => ({
-            alerts: [{ id: `${tx.id}-${now}`, title, detail, timestamp: now }, ...s.alerts].slice(0, 25),
-          }));
-          if (item.notifyOs) {
-            void getXrplBridge().notifyDesktop({ title, body: detail });
+      if (state.watchlist.length > 0) {
+        for (const item of state.watchlist) {
+          const target = item.target.trim();
+          const matchedAccount =
+            item.type === 'account' && (tx.account === target || tx.destination === target || tx.issuer === target);
+          const matchedToken =
+            item.type === 'token' &&
+            (tx.currency?.toUpperCase() === target.toUpperCase() || tx.issuer === target);
+
+          if (matchedAccount || matchedToken) {
+            const meetsMin = !item.minXrpAlert || tx.amountXrpEstimate >= item.minXrpAlert || item.type === 'token';
+            if (meetsMin) {
+              const title = `Watchlist Hit: ${item.label}`;
+              const detail = `${tx.txType} • ${tx.amountDisplay}`;
+              newAlerts.push({ id: `${tx.id}-${now}`, title, detail, timestamp: now });
+              if (item.notifyOs) {
+                void getXrplBridge().notifyDesktop({ title, body: detail });
+              }
+            }
           }
         }
       }
     }
 
-    set((s) => {
-      const recentTs = [...s.txTimestamps10s.filter((t) => t >= cutoff), now];
-      const tps = Number((recentTs.length / 10).toFixed(1));
-      const nextCounts = {
-        ...s.txCategoryCounts,
-        [tx.category]: (s.txCategoryCounts[tx.category] ?? 0) + 1,
-      };
+    if (shouldRefreshPortfolio) {
+      void get().refreshWalletPortfolio();
+    }
 
+    set((s) => {
+      const recentTs = s.txTimestamps10s.filter((t) => t >= cutoff);
+      for (let i = 0; i < txs.length; i++) {
+        recentTs.push(now);
+      }
+      const tps = Number((recentTs.length / 10).toFixed(1));
+      const nextCounts = { ...s.txCategoryCounts };
       let nextTokens = s.tokens;
-      if (tx.currency && tx.currency !== 'XRP' && tx.issuer) {
-        const exists = s.tokens.some((t) => t.issuer === tx.issuer && t.currency === tx.currency);
-        if (!exists && s.tokens.length < 240) {
-          nextTokens = [
-            {
-              id: `${tx.currency}:${tx.issuer}`,
+      let tokenSet: Set<string> | null = null;
+
+      for (const tx of txs) {
+        nextCounts[tx.category] = (nextCounts[tx.category] ?? 0) + 1;
+        if (tx.currency && tx.currency !== 'XRP' && tx.issuer && nextTokens.length < 240) {
+          if (!tokenSet) {
+            tokenSet = new Set(nextTokens.map((t) => `${t.currency}:${t.issuer}`));
+          }
+          const key = `${tx.currency}:${tx.issuer}`;
+          if (!tokenSet.has(key)) {
+            tokenSet.add(key);
+            if (nextTokens === s.tokens) nextTokens = [...s.tokens];
+            nextTokens.unshift({
+              id: key,
               currency: tx.currency,
               currencyRaw: tx.currency,
               issuer: tx.issuer,
@@ -354,45 +376,60 @@ export const useCommandStore = create<CommandState>((set, get) => ({
               priceUsd: 0,
               source: 'live-stream',
               lastSeenAt: now,
-            },
-            ...s.tokens,
-          ];
+            });
+          }
         }
       }
+
+      const nextAlerts =
+        newAlerts.length > 0 ? [...newAlerts.reverse(), ...s.alerts].slice(0, 25) : s.alerts;
 
       if (s.paused) {
         return {
           txTimestamps10s: recentTs,
           tpsEstimate: tps,
           txCategoryCounts: nextCounts,
-          totalProcessedTxs: s.totalProcessedTxs + 1,
+          totalProcessedTxs: s.totalProcessedTxs + txs.length,
           tokens: nextTokens,
+          alerts: nextAlerts,
         };
       }
 
+      // Newest transactions first
+      const newestFirst = txs.length === 1 ? txs : [...txs].reverse();
       return {
-        transactions: [tx, ...s.transactions].slice(0, MAX_TX_FEED),
+        transactions: [...newestFirst, ...s.transactions].slice(0, MAX_TX_FEED),
         txTimestamps10s: recentTs,
         tpsEstimate: tps,
         txCategoryCounts: nextCounts,
-        totalProcessedTxs: s.totalProcessedTxs + 1,
+        totalProcessedTxs: s.totalProcessedTxs + txs.length,
         tokens: nextTokens,
+        alerts: nextAlerts,
       };
     });
   },
 
-  ingestValidation: (pulse) =>
-    set((s) => ({
-      recentValidations: [pulse, ...s.recentValidations].slice(0, MAX_PULSES),
-      validatorLastSeen: {
-        ...s.validatorLastSeen,
-        [pulse.validationPublicKey]: pulse.timestamp,
-      },
-      currentLedgerValidators: {
-        ...s.currentLedgerValidators,
-        [pulse.validationPublicKey]: true,
-      },
-    })),
+  ingestValidation: (pulse) => {
+    get().ingestValidationBatch([pulse]);
+  },
+
+  ingestValidationBatch: (pulses) => {
+    if (pulses.length === 0) return;
+    set((s) => {
+      const nextLastSeen = { ...s.validatorLastSeen };
+      const nextCurrent = { ...s.currentLedgerValidators };
+      for (const p of pulses) {
+        nextLastSeen[p.validationPublicKey] = p.timestamp;
+        nextCurrent[p.validationPublicKey] = true;
+      }
+      const newestFirst = pulses.length === 1 ? pulses : [...pulses].reverse();
+      return {
+        recentValidations: [...newestFirst, ...s.recentValidations].slice(0, MAX_PULSES),
+        validatorLastSeen: nextLastSeen,
+        currentLedgerValidators: nextCurrent,
+      };
+    });
+  },
 
   ingestConsensusPhase: (phase) =>
     set((s) => ({

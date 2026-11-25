@@ -45,7 +45,7 @@ export const TopHudBar: React.FC = () => {
   };
 
   return (
-    <header className="h-14 shrink-0 border-b border-hudBorder/80 bg-panel/90 backdrop-blur px-4 flex items-center justify-between gap-3 z-30 relative">
+    <header className="h-14 shrink-0 border-b border-hudBorder/80 bg-panel/95 px-4 flex items-center justify-between gap-3 z-30 relative">
       {/* Brand & Network Selector */}
       <div className="flex items-center gap-3 min-w-0">
         <div className="flex items-center gap-2.5">

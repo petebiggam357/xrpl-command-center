@@ -1,11 +1,12 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
+import { subscribeVisualLedgerPulse, subscribeVisualTx } from '../services/streamVisualBus';
 import { TX_CATEGORY_META } from '../shared/networks';
 import { useCommandStore } from '../store/useCommandStore';
 
 interface OrbitParticle {
   angle: number;
   radius: number;
-  speed: number;
+  angularSpeed: number; // rad/sec
   size: number;
   color: string;
   alpha: number;
@@ -18,43 +19,71 @@ interface Shockwave {
   color: string;
 }
 
-export const ConsensusCoreCanvas: React.FC = () => {
+const MAX_ORBIT_PARTICLES = 96;
+
+export const ConsensusCoreCanvas: React.FC = React.memo(() => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const particlesRef = useRef<OrbitParticle[]>([]);
   const shockwavesRef = useRef<Shockwave[]>([]);
-  const lastTxIdRef = useRef<string>('');
-  const lastLedgerPulseRef = useRef<number>(0);
 
   const streamStatus = useCommandStore((s) => s.streamStatus);
   const latestLedger = useCommandStore((s) => s.ledgers[0]);
   const tpsEstimate = useCommandStore((s) => s.tpsEstimate);
   const currentLedgerValidators = useCommandStore((s) => s.currentLedgerValidators);
-  const unlCount = useCommandStore((s) => Math.max(s.validators.filter((v) => v.unl).length, 35));
+  const validators = useCommandStore((s) => s.validators);
   const paused = useCommandStore((s) => s.paused);
   const reducedMotion = useCommandStore((s) => s.reducedMotion);
 
-  // Spawn particles when transactions arrive
-  useEffect(() => {
-    const unsub = useCommandStore.subscribe((state) => {
-      const topTx = state.transactions[0];
-      if (topTx && topTx.id !== lastTxIdRef.current) {
-        lastTxIdRef.current = topTx.id;
-        if (!state.paused && !state.reducedMotion && particlesRef.current.length < 140) {
-          const meta = TX_CATEGORY_META[topTx.category] ?? TX_CATEGORY_META.system;
-          particlesRef.current.push({
-            angle: Math.random() * Math.PI * 2,
-            radius: 155 + Math.random() * 28,
-            speed: 0.018 + Math.random() * 0.02,
-            size: topTx.isWhale ? 5.5 : Math.min(4, 1.8 + Math.log10(Math.max(1, topTx.amountXrpEstimate)) * 0.45),
-            color: meta.color,
-            alpha: 1,
-            isWhale: topTx.isWhale,
-          });
-        }
-      }
+  const unlCount = useMemo(
+    () => Math.max(validators.filter((v) => v.unl).length, 35),
+    [validators]
+  );
+  const activeVotes = useMemo(
+    () => Object.keys(currentLedgerValidators).length,
+    [currentLedgerValidators]
+  );
 
-      if (state.lastLedgerPulseAt > lastLedgerPulseRef.current) {
-        lastLedgerPulseRef.current = state.lastLedgerPulseAt;
+  // Mirror lightweight scalar metrics into refs so the 60fps loop never scans arrays/objects
+  const metricsRef = useRef({
+    activeVotes: 0,
+    unlCount: 35,
+    phase: 'open',
+    connected: false,
+    paused: false,
+    reducedMotion: false,
+  });
+
+  metricsRef.current.activeVotes = activeVotes;
+  metricsRef.current.unlCount = unlCount;
+  metricsRef.current.phase = streamStatus.consensusPhase;
+  metricsRef.current.connected = streamStatus.connected;
+  metricsRef.current.paused = paused;
+  metricsRef.current.reducedMotion = reducedMotion;
+
+  // Spawn particles & shockwaves directly from zero-overhead visual bus
+  useEffect(() => {
+    const unsubTx = subscribeVisualTx((tx) => {
+      const m = metricsRef.current;
+      if (m.paused || m.reducedMotion) return;
+      const list = particlesRef.current;
+      if (list.length >= MAX_ORBIT_PARTICLES) return;
+
+      const meta = TX_CATEGORY_META[tx.category] ?? TX_CATEGORY_META.system;
+      list.push({
+        angle: Math.random() * Math.PI * 2,
+        radius: 155 + Math.random() * 28,
+        angularSpeed: 1.1 + Math.random() * 1.1,
+        size: tx.isWhale
+          ? 5.5
+          : Math.min(4, 1.8 + Math.log10(Math.max(1, tx.amountXrpEstimate)) * 0.45),
+        color: meta.color,
+        alpha: 1,
+        isWhale: tx.isWhale,
+      });
+    });
+
+    const unsubPulse = subscribeVisualLedgerPulse(() => {
+      if (shockwavesRef.current.length < 6) {
         shockwavesRef.current.push({
           radius: 42,
           alpha: 0.95,
@@ -62,26 +91,39 @@ export const ConsensusCoreCanvas: React.FC = () => {
         });
       }
     });
-    return unsub;
+
+    return () => {
+      unsubTx();
+      unsubPulse();
+    };
   }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { alpha: true });
     if (!ctx) return;
+
+    // Pre-build radial glow gradient once (zero per-frame gradient allocation!)
+    const coreGlow = ctx.createRadialGradient(0, 0, 8, 0, 0, 62);
+    coreGlow.addColorStop(0, 'rgba(34, 211, 238, 0.28)');
+    coreGlow.addColorStop(0.65, 'rgba(14, 165, 233, 0.09)');
+    coreGlow.addColorStop(1, 'rgba(4, 8, 17, 0)');
 
     let rafId = 0;
     let tick = 0;
+    let cssW = 0;
+    let cssH = 0;
+    let lastTs = performance.now();
 
     const resize = () => {
       const parent = canvas.parentElement;
       if (!parent) return;
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      const w = parent.clientWidth;
-      const h = parent.clientHeight;
-      canvas.width = Math.max(1, Math.floor(w * dpr));
-      canvas.height = Math.max(1, Math.floor(h * dpr));
+      const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+      cssW = parent.clientWidth;
+      cssH = parent.clientHeight;
+      canvas.width = Math.max(1, Math.floor(cssW * dpr));
+      canvas.height = Math.max(1, Math.floor(cssH * dpr));
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     };
 
@@ -89,35 +131,40 @@ export const ConsensusCoreCanvas: React.FC = () => {
     const observer = new ResizeObserver(resize);
     if (canvas.parentElement) observer.observe(canvas.parentElement);
 
-    const draw = () => {
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      const w = canvas.width / dpr;
-      const h = canvas.height / dpr;
-      const cx = w / 2;
-      const cy = h / 2;
-      const scale = Math.min(w, h) / 360;
-
-      ctx.clearRect(0, 0, w, h);
-
-      const state = useCommandStore.getState();
-      const activeVals = Object.keys(state.currentLedgerValidators).length;
-      const totalSlots = Math.max(state.validators.filter((v) => v.unl).length, 35);
-      const quorumRatio = Math.min(1, activeVals / Math.max(1, Math.round(totalSlots * 0.8)));
-
-      if (!state.paused && !state.reducedMotion) {
-        tick += 0.015;
+    const draw = (now: number) => {
+      rafId = requestAnimationFrame(draw);
+      if (document.hidden || cssW <= 0 || cssH <= 0) {
+        lastTs = now;
+        return;
       }
 
-      // Subtle radar rings
+      const dt = Math.min(0.05, Math.max(0.001, (now - lastTs) / 1000));
+      lastTs = now;
+
+      const cx = cssW / 2;
+      const cy = cssH / 2;
+      const scale = Math.min(cssW, cssH) / 360;
+
+      ctx.clearRect(0, 0, cssW, cssH);
+
+      const m = metricsRef.current;
+      const shouldMove = !m.paused && !m.reducedMotion;
+      const quorumRatio = Math.min(1, m.activeVotes / Math.max(1, Math.round(m.unlCount * 0.8)));
+
+      if (shouldMove) {
+        tick += dt * 0.9;
+      }
+
       ctx.save();
       ctx.translate(cx, cy);
       ctx.scale(scale, scale);
 
+      // Subtle radar rings
+      ctx.strokeStyle = 'rgba(56, 189, 248, 0.11)';
+      ctx.lineWidth = 1;
       for (const r of [64, 108, 146]) {
         ctx.beginPath();
         ctx.arc(0, 0, r, 0, Math.PI * 2);
-        ctx.strokeStyle = 'rgba(56, 189, 248, 0.11)';
-        ctx.lineWidth = 1;
         ctx.stroke();
       }
 
@@ -135,9 +182,9 @@ export const ConsensusCoreCanvas: React.FC = () => {
       // Quorum progress arc
       const startAngle = -Math.PI / 2;
       const phaseColor =
-        state.streamStatus.consensusPhase === 'accepted'
+        m.phase === 'accepted'
           ? '#34d399'
-          : state.streamStatus.consensusPhase === 'establish'
+          : m.phase === 'establish'
             ? '#fbbf24'
             : '#22d3ee';
 
@@ -158,12 +205,14 @@ export const ConsensusCoreCanvas: React.FC = () => {
       ctx.stroke();
 
       // UNL Validator ring nodes
-      const ringNodes = Math.min(totalSlots, 42);
+      const ringNodes = Math.min(m.unlCount, 42);
       for (let i = 0; i < ringNodes; i++) {
         const a = (i / ringNodes) * Math.PI * 2 - Math.PI / 2;
         const x = Math.cos(a) * 146;
         const y = Math.sin(a) * 146;
-        const isLit = i < activeVals || (activeVals === 0 && state.streamStatus.connected && Math.sin(tick * 3 + i) > 0.65);
+        const isLit =
+          i < m.activeVotes ||
+          (m.activeVotes === 0 && m.connected && Math.sin(tick * 3 + i) > 0.65);
 
         if (isLit) {
           ctx.beginPath();
@@ -180,12 +229,14 @@ export const ConsensusCoreCanvas: React.FC = () => {
         ctx.fill();
       }
 
-      // Spiraling transaction packets entering the consensus core
-      const nextParticles: OrbitParticle[] = [];
-      for (const p of particlesRef.current) {
-        if (!state.paused && !state.reducedMotion) {
-          p.angle += p.speed;
-          p.radius -= 1.45;
+      // Spiraling transaction packets entering the consensus core (delta-time normalized)
+      const pList = particlesRef.current;
+      let pWrite = 0;
+      for (let i = 0; i < pList.length; i++) {
+        const p = pList[i];
+        if (shouldMove) {
+          p.angle += p.angularSpeed * dt;
+          p.radius -= 86 * dt;
           p.alpha = Math.min(1, Math.max(0, (p.radius - 36) / 48));
         }
         if (p.radius > 38) {
@@ -204,18 +255,21 @@ export const ConsensusCoreCanvas: React.FC = () => {
             ctx.lineWidth = 1.2;
             ctx.stroke();
           }
-          ctx.globalAlpha = 1;
-          nextParticles.push(p);
+          pList[pWrite++] = p;
         }
       }
-      particlesRef.current = nextParticles;
+      pList.length = pWrite;
+      ctx.globalAlpha = 1;
 
-      // Ledger close shockwaves
-      const nextWaves: Shockwave[] = [];
-      for (const wave of shockwavesRef.current) {
-        if (!state.paused && !state.reducedMotion) {
-          wave.radius += 2.8;
-          wave.alpha *= 0.945;
+      // Ledger close shockwaves (delta-time normalized)
+      const wList = shockwavesRef.current;
+      let wWrite = 0;
+      const fadeFactor = Math.pow(0.035, dt);
+      for (let i = 0; i < wList.length; i++) {
+        const wave = wList[i];
+        if (shouldMove) {
+          wave.radius += 165 * dt;
+          wave.alpha *= fadeFactor;
         }
         if (wave.alpha > 0.04 && wave.radius < 185) {
           ctx.beginPath();
@@ -224,20 +278,16 @@ export const ConsensusCoreCanvas: React.FC = () => {
           ctx.globalAlpha = wave.alpha;
           ctx.lineWidth = 2.4;
           ctx.stroke();
-          ctx.globalAlpha = 1;
-          nextWaves.push(wave);
+          wList[wWrite++] = wave;
         }
       }
-      shockwavesRef.current = nextWaves;
+      wList.length = wWrite;
+      ctx.globalAlpha = 1;
 
-      // Central core glow
-      const grad = ctx.createRadialGradient(0, 0, 8, 0, 0, 62);
-      grad.addColorStop(0, 'rgba(34, 211, 238, 0.28)');
-      grad.addColorStop(0.65, 'rgba(14, 165, 233, 0.09)');
-      grad.addColorStop(1, 'rgba(4, 8, 17, 0)');
+      // Central core glow (pre-allocated gradient)
       ctx.beginPath();
       ctx.arc(0, 0, 62, 0, Math.PI * 2);
-      ctx.fillStyle = grad;
+      ctx.fillStyle = coreGlow;
       ctx.fill();
 
       ctx.beginPath();
@@ -249,7 +299,6 @@ export const ConsensusCoreCanvas: React.FC = () => {
       ctx.stroke();
 
       ctx.restore();
-      rafId = requestAnimationFrame(draw);
     };
 
     rafId = requestAnimationFrame(draw);
@@ -258,8 +307,6 @@ export const ConsensusCoreCanvas: React.FC = () => {
       observer.disconnect();
     };
   }, []);
-
-  const activeVotes = Object.keys(currentLedgerValidators).length;
 
   return (
     <div className="hud-panel rounded-xl p-4 flex flex-col relative overflow-hidden h-[340px]">
@@ -326,4 +373,4 @@ export const ConsensusCoreCanvas: React.FC = () => {
       )}
     </div>
   );
-};
+});

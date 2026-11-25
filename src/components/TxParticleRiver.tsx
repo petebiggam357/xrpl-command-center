@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import { subscribeVisualTx } from '../services/streamVisualBus';
 import { TX_CATEGORY_META } from '../shared/networks';
 import type { LiveTransaction } from '../shared/types';
 import { useCommandStore } from '../store/useCommandStore';
@@ -8,7 +9,7 @@ interface RiverPacket {
   x: number; // 0..1 normalized progress across pipeline
   lane: number;
   yJitter: number;
-  speed: number;
+  speedPerSec: number; // normalized width per second
   radius: number;
   color: string;
 }
@@ -22,37 +23,37 @@ const LANE_LABELS = [
   { label: 'Trust / Sys', color: '#60a5fa' },
 ];
 
-export const TxParticleRiver: React.FC = () => {
+const MAX_PACKETS = 120;
+
+export const TxParticleRiver: React.FC = React.memo(() => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const packetsRef = useRef<RiverPacket[]>([]);
-  const lastTxIdRef = useRef<string>('');
   const inspectLiveTransaction = useCommandStore((s) => s.inspectLiveTransaction);
   const totalProcessedTxs = useCommandStore((s) => s.totalProcessedTxs);
 
   useEffect(() => {
-    const unsub = useCommandStore.subscribe((state) => {
-      const tx = state.transactions[0];
-      if (!tx || tx.id === lastTxIdRef.current) return;
-      lastTxIdRef.current = tx.id;
+    const unsub = subscribeVisualTx((tx) => {
+      const state = useCommandStore.getState();
       if (state.paused || state.reducedMotion) return;
 
       const meta = TX_CATEGORY_META[tx.category] ?? TX_CATEGORY_META.system;
       const radius = tx.isWhale
         ? 7.5
-        : Math.min(6, 2.6 + Math.log10(Math.max(1, tx.amountXrpEstimate)) * 0.6);
+        : Math.min(5.5, 2.6 + Math.log10(Math.max(1, tx.amountXrpEstimate)) * 0.55);
 
-      packetsRef.current.push({
+      const list = packetsRef.current;
+      list.push({
         tx,
         x: 0.02,
         lane: meta.lane,
         yJitter: (Math.random() - 0.5) * 14,
-        speed: 0.0045 + Math.random() * 0.003,
+        speedPerSec: 0.28 + Math.random() * 0.16,
         radius,
         color: meta.color,
       });
 
-      if (packetsRef.current.length > 220) {
-        packetsRef.current.splice(0, packetsRef.current.length - 220);
+      if (list.length > MAX_PACKETS) {
+        list.splice(0, list.length - MAX_PACKETS);
       }
     });
     return unsub;
@@ -61,110 +62,141 @@ export const TxParticleRiver: React.FC = () => {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { alpha: true });
     if (!ctx) return;
 
+    // Offscreen static backdrop (lanes, labels, consensus gate) — only redrawn on resize
+    const bgCanvas = document.createElement('canvas');
+    const bgCtx = bgCanvas.getContext('2d');
+
     let rafId = 0;
+    let cssW = 0;
+    let cssH = 0;
+    let dpr = 1;
+    let lastTs = performance.now();
+
+    const redrawStaticBackdrop = () => {
+      if (!bgCtx || cssW <= 0 || cssH <= 0) return;
+      bgCanvas.width = Math.max(1, Math.floor(cssW * dpr));
+      bgCanvas.height = Math.max(1, Math.floor(cssH * dpr));
+      bgCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      bgCtx.clearRect(0, 0, cssW, cssH);
+
+      const leftPad = 108;
+      const rightPad = 24;
+      const usableW = Math.max(80, cssW - leftPad - rightPad);
+      const laneHeight = cssH / LANE_LABELS.length;
+      const gateX = leftPad + usableW * 0.68;
+
+      // Stage guide regions (Proposed -> Consensus Gate -> Validated)
+      bgCtx.fillStyle = 'rgba(34, 211, 238, 0.03)';
+      bgCtx.fillRect(leftPad, 0, usableW * 0.68, cssH);
+      bgCtx.fillStyle = 'rgba(52, 211, 153, 0.04)';
+      bgCtx.fillRect(gateX, 0, usableW * 0.32, cssH);
+
+      // Consensus validation gate vertical beam
+      bgCtx.beginPath();
+      bgCtx.setLineDash([5, 5]);
+      bgCtx.moveTo(gateX, 6);
+      bgCtx.lineTo(gateX, cssH - 6);
+      bgCtx.strokeStyle = 'rgba(52, 211, 153, 0.45)';
+      bgCtx.lineWidth = 1.5;
+      bgCtx.stroke();
+      bgCtx.setLineDash([]);
+
+      // Lane tracks & labels
+      bgCtx.font = '11px "JetBrains Mono", monospace';
+      bgCtx.textBaseline = 'middle';
+      for (let i = 0; i < LANE_LABELS.length; i++) {
+        const cy = laneHeight * i + laneHeight / 2;
+        bgCtx.beginPath();
+        bgCtx.moveTo(leftPad, cy);
+        bgCtx.lineTo(cssW - rightPad, cy);
+        bgCtx.strokeStyle = 'rgba(148, 163, 184, 0.12)';
+        bgCtx.lineWidth = 1;
+        bgCtx.stroke();
+
+        bgCtx.fillStyle = LANE_LABELS[i].color;
+        bgCtx.beginPath();
+        bgCtx.arc(12, cy, 3.5, 0, Math.PI * 2);
+        bgCtx.fill();
+
+        bgCtx.fillStyle = '#94a3b8';
+        bgCtx.fillText(LANE_LABELS[i].label, 22, cy);
+      }
+    };
 
     const resize = () => {
       const parent = canvas.parentElement;
       if (!parent) return;
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      canvas.width = Math.max(1, Math.floor(parent.clientWidth * dpr));
-      canvas.height = Math.max(1, Math.floor(parent.clientHeight * dpr));
+      dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+      cssW = parent.clientWidth;
+      cssH = parent.clientHeight;
+      canvas.width = Math.max(1, Math.floor(cssW * dpr));
+      canvas.height = Math.max(1, Math.floor(cssH * dpr));
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      redrawStaticBackdrop();
     };
 
     resize();
     const observer = new ResizeObserver(resize);
     if (canvas.parentElement) observer.observe(canvas.parentElement);
 
-    const draw = () => {
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      const w = canvas.width / dpr;
-      const h = canvas.height / dpr;
+    const draw = (now: number) => {
+      rafId = requestAnimationFrame(draw);
+      if (document.hidden || cssW <= 0 || cssH <= 0) {
+        lastTs = now;
+        return;
+      }
+
+      const dt = Math.min(0.05, Math.max(0.001, (now - lastTs) / 1000));
+      lastTs = now;
+
       const leftPad = 108;
       const rightPad = 24;
-      const usableW = Math.max(80, w - leftPad - rightPad);
-      const laneHeight = h / LANE_LABELS.length;
-      const gateX = leftPad + usableW * 0.68;
+      const usableW = Math.max(80, cssW - leftPad - rightPad);
+      const laneHeight = cssH / LANE_LABELS.length;
 
-      ctx.clearRect(0, 0, w, h);
-
-      // Draw stage guide regions (Proposed -> Consensus Gate -> Validated)
-      ctx.fillStyle = 'rgba(34, 211, 238, 0.03)';
-      ctx.fillRect(leftPad, 0, usableW * 0.68, h);
-      ctx.fillStyle = 'rgba(52, 211, 153, 0.04)';
-      ctx.fillRect(gateX, 0, usableW * 0.32, h);
-
-      // Consensus validation gate vertical beam
-      ctx.beginPath();
-      ctx.setLineDash([5, 5]);
-      ctx.moveTo(gateX, 6);
-      ctx.lineTo(gateX, h - 6);
-      ctx.strokeStyle = 'rgba(52, 211, 153, 0.45)';
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-      ctx.setLineDash([]);
-
-      // Draw lane tracks & labels
-      ctx.font = '11px "JetBrains Mono", monospace';
-      for (let i = 0; i < LANE_LABELS.length; i++) {
-        const cy = laneHeight * i + laneHeight / 2;
-        ctx.beginPath();
-        ctx.moveTo(leftPad, cy);
-        ctx.lineTo(w - rightPad, cy);
-        ctx.strokeStyle = 'rgba(148, 163, 184, 0.12)';
-        ctx.lineWidth = 1;
-        ctx.stroke();
-
-        ctx.fillStyle = LANE_LABELS[i].color;
-        ctx.beginPath();
-        ctx.arc(12, cy, 3.5, 0, Math.PI * 2);
-        ctx.fill();
-
-        ctx.fillStyle = '#94a3b8';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(LANE_LABELS[i].label, 22, cy);
+      ctx.clearRect(0, 0, cssW, cssH);
+      if (bgCanvas.width > 0 && bgCanvas.height > 0) {
+        ctx.drawImage(bgCanvas, 0, 0, cssW, cssH);
       }
 
       const state = useCommandStore.getState();
-      const next: RiverPacket[] = [];
+      const shouldMove = !state.paused && !state.reducedMotion;
+      const list = packetsRef.current;
+      let writeIdx = 0;
 
-      for (const p of packetsRef.current) {
-        if (!state.paused && !state.reducedMotion) {
-          p.x += p.speed;
+      ctx.lineCap = 'round';
+      for (let i = 0; i < list.length; i++) {
+        const p = list[i];
+        if (shouldMove) {
+          p.x += p.speedPerSec * dt;
         }
         if (p.x <= 1.02) {
           const px = leftPad + p.x * usableW;
           const py = laneHeight * p.lane + laneHeight / 2 + p.yJitter;
 
-          // Motion trail
-          const trailGrad = ctx.createLinearGradient(px - 28, py, px, py);
-          trailGrad.addColorStop(0, 'rgba(0,0,0,0)');
-          trailGrad.addColorStop(1, p.color);
+          // Zero-allocation neon motion trail (no per-frame createLinearGradient!)
+          const trailStart = Math.max(leftPad, px - 26);
+          ctx.globalAlpha = 0.28;
           ctx.beginPath();
-          ctx.moveTo(Math.max(leftPad, px - 28), py);
+          ctx.moveTo(trailStart, py);
           ctx.lineTo(px, py);
-          ctx.strokeStyle = trailGrad;
-          ctx.lineWidth = Math.max(1.5, p.radius * 0.7);
+          ctx.strokeStyle = p.color;
+          ctx.lineWidth = Math.max(1.5, p.radius * 0.72);
           ctx.stroke();
 
           // Packet core
+          ctx.globalAlpha = 1;
           ctx.beginPath();
           ctx.arc(px, py, p.radius, 0, Math.PI * 2);
           ctx.fillStyle = p.x > 0.68 ? '#ecfeff' : p.color;
           ctx.fill();
 
-          ctx.beginPath();
-          ctx.arc(px, py, p.radius + 1.5, 0, Math.PI * 2);
-          ctx.strokeStyle = p.color;
-          ctx.lineWidth = 1;
-          ctx.stroke();
-
           if (p.tx.isWhale) {
             ctx.beginPath();
-            ctx.arc(px, py, p.radius + 6, 0, Math.PI * 2);
+            ctx.arc(px, py, p.radius + 5.5, 0, Math.PI * 2);
             ctx.strokeStyle = 'rgba(251, 191, 36, 0.85)';
             ctx.lineWidth = 1.5;
             ctx.stroke();
@@ -173,12 +205,10 @@ export const TxParticleRiver: React.FC = () => {
             ctx.fillText(`WHALE ${p.tx.amountDisplay}`, px + 10, py - 8);
           }
 
-          next.push(p);
+          list[writeIdx++] = p;
         }
       }
-      packetsRef.current = next;
-
-      rafId = requestAnimationFrame(draw);
+      list.length = writeIdx;
     };
 
     rafId = requestAnimationFrame(draw);
@@ -244,4 +274,4 @@ export const TxParticleRiver: React.FC = () => {
       </div>
     </div>
   );
-};
+});

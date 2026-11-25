@@ -32,6 +32,8 @@ export class XrplStreamManager extends EventEmitter {
   private rpcSeq = 1;
   private pending = new Map<number, PendingRpc>();
   private lastLedgerCloseMs: number | null = null;
+  private lastMessageAt = 0;
+  private missedPings = 0;
   private destroyed = false;
 
   private status: StreamStatus = {
@@ -130,6 +132,8 @@ export class XrplStreamManager extends EventEmitter {
 
     ws.on('open', () => {
       this.reconnectAttempts = 0;
+      this.missedPings = 0;
+      this.lastMessageAt = Date.now();
       this.emitStatus({
         connected: true,
         connecting: false,
@@ -160,6 +164,7 @@ export class XrplStreamManager extends EventEmitter {
     });
 
     ws.on('message', (data) => {
+      this.lastMessageAt = Date.now();
       try {
         const msg = JSON.parse(data.toString('utf8')) as Record<string, unknown>;
         this.handleMessage(msg);
@@ -218,12 +223,22 @@ export class XrplStreamManager extends EventEmitter {
 
   private async measureLatency(): Promise<void> {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
-    const start = Date.now();
+    const now = Date.now();
+    // Auto-failover if socket went completely silent for >25s
+    if (this.lastMessageAt > 0 && now - this.lastMessageAt > 25_000) {
+      this.scheduleReconnect('Stream stalled (no frames for 25s), failing over...');
+      return;
+    }
+    const start = now;
     try {
       await this.request('ping');
+      this.missedPings = 0;
       this.emitStatus({ latencyMs: Date.now() - start });
     } catch {
-      // ignore failed ping
+      this.missedPings += 1;
+      if (this.missedPings >= 2) {
+        this.scheduleReconnect('Heartbeat timeout, failing over...');
+      }
     }
   }
 

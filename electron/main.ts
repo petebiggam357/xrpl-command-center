@@ -86,17 +86,14 @@ streamManager.on('ledger', (ledger) => {
 });
 streamManager.on('transaction', (tx) => {
   sendToRenderer('xrpl:tx', tx);
-  if (analyticsService && tx.validated) {
-    void walletVault
-      ?.getStatus()
-      .then((st) => {
-        const tracked = st.accounts.some(
-          (a) => a.address === tx.account || a.address === tx.destination
-        );
-        if (tracked) {
-          void analyticsService.recordMatchedStreamTx(streamManager.getStatus().networkId, tx);
-        }
-      })
+  if (
+    analyticsService &&
+    tx.validated &&
+    walletVault &&
+    (walletVault.isTrackedAddress(tx.account) || walletVault.isTrackedAddress(tx.destination))
+  ) {
+    void analyticsService
+      .recordMatchedStreamTx(streamManager.getStatus().networkId, tx)
       .catch(() => undefined);
   }
 });
@@ -528,6 +525,7 @@ app.whenReady().then(() => {
   dockerService = new DockerNodeService(userDataDir);
   analyticsService = new AnalyticsSqliteService(userDataDir);
   void analyticsService.init();
+  void walletVault.getStatus().catch(() => undefined);
 
   configureAutoUpdater();
   registerIpcHandlers();

@@ -15,7 +15,7 @@ const FILTER_OPTIONS: Array<{ id: 'all' | TxCategory; label: string }> = [
   { id: 'trust', label: 'Trust' },
 ];
 
-export const LiveTxFeed: React.FC = () => {
+export const LiveTxFeed: React.FC = React.memo(() => {
   const transactions = useCommandStore((s) => s.transactions);
   const txCategoryCounts = useCommandStore((s) => s.txCategoryCounts);
   const inspectLiveTransaction = useCommandStore((s) => s.inspectLiveTransaction);
@@ -127,4 +127,4 @@ export const LiveTxFeed: React.FC = () => {
       </div>
     </div>
   );
-};
+});
