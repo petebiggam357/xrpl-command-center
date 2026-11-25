@@ -39,11 +39,13 @@ win:
     - target: portable
       arch:
         - x64
-  artifactName: XRPL-Command-Center-${version}-win-${arch}-${target}.${ext}
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
+  artifactName: XRPL-Command-Center-${version}-win-${arch}-setup.${ext}
+portable:
+  artifactName: XRPL-Command-Center-${version}-win-${arch}-portable.${ext}
 mac:
   category: public.app-category.developer-tools
   icon: build/icon.png
@@ -51,5 +53,4 @@ mac:
     - target: dmg
       arch:
         - arm64
-        - x64
   artifactName: XRPL-Command-Center-${version}-mac-${arch}.${ext}
