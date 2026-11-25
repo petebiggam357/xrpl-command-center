@@ -69,3 +69,4 @@ jobs:
             release/*.AppImage
             release/*.exe
             release/*.dmg
+            release/latest*.yml

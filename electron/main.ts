@@ -232,6 +232,7 @@ function syncNodeWatchdogTimer(): void {
 }
 
 function configureAutoUpdater(): void {
+  autoUpdater.logger = null;
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
 
