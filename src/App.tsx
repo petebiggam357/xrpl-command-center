@@ -4,6 +4,7 @@ import { ConsensusCoreCanvas } from './components/ConsensusCoreCanvas';
 import { InspectorDrawer } from './components/InspectorDrawer';
 import { LedgerRibbon } from './components/LedgerRibbon';
 import { LiveTxFeed } from './components/LiveTxFeed';
+import { MempoolRadarPanel } from './components/MempoolRadarPanel';
 import { PerfHudPill } from './components/PerfHudPill';
 import { QuickStartModal } from './components/QuickStartModal';
 import { SidebarNav } from './components/SidebarNav';
@@ -179,6 +180,7 @@ export const App: React.FC = () => {
                 </div>
               </div>
               <LedgerRibbon />
+              <MempoolRadarPanel />
               <LiveTxFeed />
             </div>
           )}

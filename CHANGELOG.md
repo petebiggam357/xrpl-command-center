@@ -2,6 +2,20 @@
 
 All notable changes to **XRPL Command Center** are documented in this file.
 
+## [0.2.4-beta] - 2026-11-26
+
+### Added
+- **Track 1 — Live XRPL Mempool & Open-Ledger Fee-Pressure Radar (`Command Deck`):**
+  - Added `MempoolRadarPanel` polling `fee` RPC every 8s alongside real-time unvalidated (`transactions_proposed`) stream events to display live Open-Ledger Fee, Median Fee, Open-Ledger Load %, Escalation Queue Fill %, pending whale badges, and an expandable click-to-inspect pending queue.
+- **Track 2 — XLS-30 AMM Impermanent Loss & LP Yield Simulator (`Tokens & DEX`):**
+  - Added interactive constant-product (`x·y=k`) Impermanent Loss & LP Fee Yield Simulator (`simulateAmmLpYield`) inside `TokenExplorer` with Deposit, Price Move (`-80%` to `+400%`), 24h Pool Volume, and Holding Horizon sliders projecting IL %, Est. APR %, Net vs. HODL (XRP), and Break-Even Days.
+- **Track 3 — Streaming Payment Channels Studio & RegularKey Rotation (`Wallets & DeFi`):**
+  - Extended `WalletTxIntent` and `WalletVaultService` with native `PaymentChannelCreate`, `PaymentChannelFund`, and `SetRegularKey` transaction builders.
+  - Added **Streaming Payment Channels** studio (`Escrows, Checks & NFTs` sub-tab) with live `account_channels` viewer and 1-click channel top-up, plus **RegularKey Rotation & Key Hygiene** (`Multi-Sig` sub-tab) with blackhole address safety guards.
+- **Track 4 — Interactive Account Fund-Flow Graph (`InspectorDrawer`):**
+  - Added a radial SVG **Account Fund-Flow & Counterparty Graph** (`buildAccountFlowGraph`) inside the Account Inspector showing directional inbound/outbound/bidirectional XRP volume edges with Address Book label resolution and click-to-hop navigation into any counterparty account.
+- **Verification:** Added `tests/v024PowerSuite.test.ts` (6 new unit tests; **76/76** total Vitest tests passing across 14 suites).
+
 ## [0.2.3-beta] - 2026-11-26
 
 ### Added

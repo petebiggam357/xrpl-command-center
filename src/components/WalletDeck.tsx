@@ -47,7 +47,11 @@ import {
   buildAccountSecurityAuditMarkdown,
   buildEscrowVestingSchedule,
 } from '../shared/v023Utils';
-import { shortenAddress } from '../shared/xrplCodec';
+import {
+  validatePaymentChannelCreate,
+  validateRegularKeyRotation,
+} from '../shared/v024Utils';
+import { dropsToXrpString, shortenAddress } from '../shared/xrplCodec';
 import { useCommandStore } from '../store/useCommandStore';
 import { AddressBookPanel } from './AddressBookPanel';
 import { DexDepthCanvas } from './DexDepthCanvas';
@@ -150,6 +154,18 @@ export const WalletDeck: React.FC = () => {
     return nextMonth.toISOString().slice(0, 10);
   });
   const [vestCancelBufferDays, setVestCancelBufferDays] = useState('90');
+
+  // Track 3 (v0.2.4-beta): Payment Channels Studio & RegularKey Rotation
+  const [chDest, setChDest] = useState('');
+  const [chAmountXrp, setChAmountXrp] = useState('25');
+  const [chSettleDelaySec, setChSettleDelaySec] = useState('3600');
+  const [chPublicKeyHex, setChPublicKeyHex] = useState('');
+  const [chList, setChList] = useState<
+    Array<{ channelId: string; destination: string; amountXrp: string; balanceXrp: string; settleDelay: number }>
+  >([]);
+  const [chLoading, setChLoading] = useState(false);
+  const [chTopUpAmt, setChTopUpAmt] = useState('10');
+  const [regularKeyInput, setRegularKeyInput] = useState('');
 
   const [checkDest, setCheckDest] = useState('');
   const [checkXrp, setCheckXrp] = useState('');
@@ -441,6 +457,73 @@ export const WalletDeck: React.FC = () => {
         : res.error ?? 'Failed to export security audit.',
     });
   };
+
+  const handleLoadPaymentChannels = async () => {
+    if (!activeAccount) return;
+    setChLoading(true);
+    try {
+      const res = await getXrplBridge().rpcRequest('account_channels', {
+        account: activeAccount.address,
+        ledger_index: 'validated',
+      });
+      const result = (res.result ?? res) as Record<string, unknown>;
+      const rows = Array.isArray(result.channels) ? result.channels : [];
+      setChList(
+        rows.map((r) => {
+          const obj = (r ?? {}) as Record<string, unknown>;
+          return {
+            channelId: String(obj.channel_id ?? ''),
+            destination: String(obj.destination_account ?? ''),
+            amountXrp: dropsToXrpString(String(obj.amount ?? '0'), 4),
+            balanceXrp: dropsToXrpString(String(obj.balance ?? '0'), 4),
+            settleDelay: Number(obj.settle_delay ?? 0),
+          };
+        })
+      );
+    } catch (err) {
+      setVaultBannerMsg({
+        ok: false,
+        text: err instanceof Error ? err.message : 'Unable to query account_channels',
+      });
+    } finally {
+      setChLoading(false);
+    }
+  };
+
+  const submitPaymentChannelCreate = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeAccount) return;
+    const pub = chPublicKeyHex.trim();
+    const check = validatePaymentChannelCreate({
+      destination: chDest,
+      amountXrp: chAmountXrp,
+      settleDelaySec: Number(chSettleDelaySec),
+      publicKeyHex: pub,
+    });
+    if (!check.ok) {
+      setVaultBannerMsg({ ok: false, text: check.error ?? 'Invalid payment channel parameters' });
+      return;
+    }
+    void openTxConfirmModal(activeAccount.id, {
+      kind: 'PaymentChannelCreate',
+      account: activeAccount.address,
+      destination: chDest.trim(),
+      amountXrp: chAmountXrp.trim(),
+      settleDelaySec: Number(chSettleDelaySec),
+      publicKeyHex: pub,
+    });
+  };
+
+  const regularKeyCheck = useMemo(
+    () =>
+      activeAccount
+        ? validateRegularKeyRotation({
+            account: activeAccount.address,
+            regularKey: regularKeyInput,
+          })
+        : null,
+    [activeAccount, regularKeyInput]
+  );
 
   const filteredRecentTxs = useMemo(() => {
     const list = walletPortfolio?.recentTransactions ?? [];
@@ -2131,6 +2214,118 @@ export const WalletDeck: React.FC = () => {
                     ) : null}
                   </div>
 
+                  {/* Track 3 (v0.2.4-beta): Streaming Payment Channels Studio */}
+                  <div className="hud-panel rounded-xl p-4 space-y-3 border border-emerald-400/25">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <Repeat className="w-4 h-4 text-emerald-400" />
+                        <h3 className="text-xs font-semibold uppercase tracking-[0.15em] text-emerald-300">
+                          Streaming Payment Channels (`PaymentChannelCreate` / `Fund`)
+                        </h3>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={chLoading}
+                        onClick={() => void handleLoadPaymentChannels()}
+                        className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-700 text-[11px] font-mono text-emerald-200 hover:border-emerald-400/50"
+                      >
+                        <RefreshCw className={`w-3 h-3 ${chLoading ? 'animate-spin' : ''}`} />
+                        Load Active Channels ({chList.length})
+                      </button>
+                    </div>
+
+                    <form onSubmit={submitPaymentChannelCreate} className="grid grid-cols-1 md:grid-cols-12 gap-2">
+                      <input
+                        required
+                        type="text"
+                        value={chDest}
+                        onChange={(e) => setChDest(e.target.value)}
+                        placeholder="Recipient r-Address"
+                        className="md:col-span-4 rounded-lg bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs font-mono text-white"
+                      />
+                      <input
+                        required
+                        type="text"
+                        value={chAmountXrp}
+                        onChange={(e) => setChAmountXrp(e.target.value)}
+                        placeholder="XRP Deposit"
+                        className="md:col-span-2 rounded-lg bg-slate-950 border border-slate-700 px-2.5 py-1.5 text-xs font-mono text-white"
+                      />
+                      <input
+                        required
+                        type="number"
+                        min="60"
+                        value={chSettleDelaySec}
+                        onChange={(e) => setChSettleDelaySec(e.target.value)}
+                        placeholder="Settle (s)"
+                        title="SettleDelay in seconds (minimum 60)"
+                        className="md:col-span-2 rounded-lg bg-slate-950 border border-slate-700 px-2.5 py-1.5 text-xs font-mono text-white"
+                      />
+                      <input
+                        required
+                        type="text"
+                        value={chPublicKeyHex}
+                        onChange={(e) => setChPublicKeyHex(e.target.value)}
+                        placeholder="66-hex PublicKey (ED... / 02... / 03...)"
+                        className="md:col-span-4 rounded-lg bg-slate-950 border border-slate-700 px-2.5 py-1.5 text-xs font-mono text-white"
+                      />
+                      <button
+                        type="submit"
+                        className="md:col-span-12 py-2 rounded-xl bg-emerald-500/20 border border-emerald-400/50 text-xs font-mono font-semibold text-emerald-200 hover:bg-emerald-500/30"
+                      >
+                        Preview PaymentChannelCreate
+                      </button>
+                    </form>
+
+                    {chList.length > 0 && (
+                      <div className="space-y-1.5 pt-2 border-t border-slate-800">
+                        <div className="flex items-center justify-between text-[10px] font-mono text-slate-400">
+                          <span>Active Outgoing Channels</span>
+                          <span>
+                            Top-Up Amount:{' '}
+                            <input
+                              type="text"
+                              value={chTopUpAmt}
+                              onChange={(e) => setChTopUpAmt(e.target.value)}
+                              className="w-16 rounded bg-slate-950 border border-slate-700 px-1.5 py-0.5 text-[10px] text-emerald-200"
+                            />{' '}
+                            XRP
+                          </span>
+                        </div>
+                        {chList.map((ch) => (
+                          <div
+                            key={ch.channelId}
+                            className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 rounded-lg bg-slate-950/80 border border-slate-800 font-mono text-xs"
+                          >
+                            <div>
+                              <div className="text-emerald-300 font-bold">
+                                {ch.amountXrp} XRP funded • {ch.balanceXrp} XRP claimed
+                              </div>
+                              <div className="text-[10px] text-slate-400">
+                                To {shortenAddress(ch.destination, 8, 6)} • Delay {ch.settleDelay}s • ID{' '}
+                                {shortenAddress(ch.channelId, 8, 6)}
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void openTxConfirmModal(activeAccount.id, {
+                                  kind: 'PaymentChannelFund',
+                                  account: activeAccount.address,
+                                  channelId: ch.channelId,
+                                  amountXrp: chTopUpAmt.trim() || '10',
+                                })
+                              }
+                              className="px-2.5 py-1 rounded-lg bg-emerald-500/20 border border-emerald-400/40 text-[11px] text-emerald-200"
+                            >
+                              + Top Up {chTopUpAmt} XRP
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
                   <div className="hud-panel rounded-xl p-4 space-y-4">
                     <h3 className="text-xs font-semibold uppercase tracking-[0.15em] text-fuchsia-300">
                       XLS-20 NFToken Studio &amp; Owned Gallery ({walletPortfolio?.nfts.length ?? 0})
@@ -2268,9 +2463,69 @@ export const WalletDeck: React.FC = () => {
                 </div>
               )}
 
-              {/* SUB-TAB 5: MULTI-SIG & AIR-GAPPED COORDINATOR */}
+              {/* SUB-TAB 5: MULTI-SIG, KEY ROTATION & AIR-GAPPED COORDINATOR */}
               {subTab === 'multisig' && (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div className="space-y-4">
+                  {/* Track 3 (v0.2.4-beta): RegularKey Rotation & Key Hygiene Studio */}
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      if (!regularKeyCheck?.ok) return;
+                      void openTxConfirmModal(activeAccount.id, {
+                        kind: 'SetRegularKey',
+                        account: activeAccount.address,
+                        regularKey: regularKeyInput.trim() || undefined,
+                      });
+                    }}
+                    className="hud-panel rounded-xl p-4 space-y-3 border border-cyan-400/25"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <KeyRound className="w-4 h-4 text-cyan-400" />
+                        <h3 className="text-xs font-semibold uppercase tracking-[0.15em] text-cyan-300">
+                          RegularKey Rotation &amp; Key Hygiene (`SetRegularKey`)
+                        </h3>
+                      </div>
+                      <span className="text-[10px] font-mono text-slate-400">
+                        Active RegularKey:{' '}
+                        <strong className="text-cyan-200">
+                          {walletPortfolio?.flags.regularKey
+                            ? shortenAddress(walletPortfolio.flags.regularKey, 8, 6)
+                            : 'None (Master Key)'}
+                        </strong>
+                      </span>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      <input
+                        type="text"
+                        value={regularKeyInput}
+                        onChange={(e) => setRegularKeyInput(e.target.value)}
+                        placeholder="New RegularKey r-Address (leave blank to remove RegularKey)"
+                        className="flex-1 min-w-[260px] rounded-lg bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs font-mono text-white"
+                      />
+                      <button
+                        type="submit"
+                        disabled={!regularKeyCheck?.ok}
+                        className="px-4 py-1.5 rounded-lg bg-cyan-500/20 border border-cyan-400/50 text-xs font-mono font-semibold text-cyan-200 hover:bg-cyan-500/30 disabled:opacity-50"
+                      >
+                        {regularKeyInput.trim() ? 'Preview SetRegularKey' : 'Preview Remove RegularKey'}
+                      </button>
+                    </div>
+
+                    {regularKeyCheck?.error && (
+                      <div className="p-2 rounded-lg bg-rose-500/15 border border-rose-400/40 text-[11px] font-mono text-rose-200">
+                        {regularKeyCheck.error}
+                      </div>
+                    )}
+                    {regularKeyCheck?.warning && (
+                      <div className="p-2 rounded-lg bg-amber-500/15 border border-amber-400/40 text-[11px] font-mono text-amber-200">
+                        {regularKeyCheck.warning}
+                      </div>
+                    )}
+                  </form>
+
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                   <form
                     onSubmit={(e) => {
                       e.preventDefault();
@@ -2399,6 +2654,7 @@ export const WalletDeck: React.FC = () => {
                     >
                       Combine Signatures &amp; Broadcast to XRPL
                     </button>
+                  </div>
                   </div>
                 </div>
               )}

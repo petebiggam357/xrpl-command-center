@@ -13,6 +13,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { computeClobVsAmmSpread } from '../shared/v023Utils';
+import { simulateAmmLpYield } from '../shared/v024Utils';
 import { formatCompactNumber, shortenAddress } from '../shared/xrplCodec';
 import { useCommandStore } from '../store/useCommandStore';
 import { DexDepthCanvas } from './DexDepthCanvas';
@@ -38,10 +39,36 @@ export const TokenExplorer: React.FC = () => {
   const [alertDir, setAlertDir] = useState<'above' | 'below'>('above');
   const [alertPriceInput, setAlertPriceInput] = useState('');
 
+  // Track 2: XLS-30 AMM Impermanent Loss & LP Yield Simulator state
+  const [simDepositXrp, setSimDepositXrp] = useState(2500);
+  const [simPriceChangePct, setSimPriceChangePct] = useState(50);
+  const [simDailyVolXrp, setSimDailyVolXrp] = useState(120_000);
+  const [simHoldingDays, setSimHoldingDays] = useState(90);
+
   const spreadReport = useMemo(
     () => (tokenOnLedgerReport ? computeClobVsAmmSpread(tokenOnLedgerReport) : null),
     [tokenOnLedgerReport]
   );
+
+  const lpSimResult = useMemo(() => {
+    const xrpReserve = tokenOnLedgerReport?.amm?.asset1Numeric ?? 50_000;
+    const feeBps = spreadReport?.ammTradingFeeBps ?? 30;
+    return simulateAmmLpYield({
+      depositXrpTotal: simDepositXrp,
+      poolTvlXrp: xrpReserve * 2,
+      dailyVolumeXrp: simDailyVolXrp,
+      tradingFeeBps: feeBps,
+      priceChangePct: simPriceChangePct,
+      holdingDays: simHoldingDays,
+    });
+  }, [
+    tokenOnLedgerReport,
+    spreadReport,
+    simDepositXrp,
+    simPriceChangePct,
+    simDailyVolXrp,
+    simHoldingDays,
+  ]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -507,6 +534,123 @@ export const TokenExplorer: React.FC = () => {
                   </div>
                 </div>
               )}
+
+              {/* Track 2: XLS-30 AMM Impermanent Loss & LP Yield Simulator */}
+              <div className="rounded-xl p-3 bg-emerald-500/5 border border-emerald-400/25 space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-[11px] font-mono uppercase text-emerald-300">
+                    XLS-30 AMM Impermanent Loss &amp; LP Yield Simulator
+                  </div>
+                  <span className="text-[10px] font-mono text-slate-400">
+                    Est. APR: <strong className="text-emerald-300">{lpSimResult.estimatedAprPct}%</strong>
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2.5 font-mono text-[10px]">
+                  <label className="space-y-1">
+                    <div className="flex justify-between text-slate-400">
+                      <span>Deposit (XRP)</span>
+                      <span className="text-white">{simDepositXrp.toLocaleString()}</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={100}
+                      max={50000}
+                      step={100}
+                      value={simDepositXrp}
+                      onChange={(e) => setSimDepositXrp(Number(e.target.value))}
+                      className="w-full accent-emerald-400"
+                    />
+                  </label>
+                  <label className="space-y-1">
+                    <div className="flex justify-between text-slate-400">
+                      <span>Price Move</span>
+                      <span className={simPriceChangePct >= 0 ? 'text-emerald-300' : 'text-rose-300'}>
+                        {simPriceChangePct >= 0 ? `+${simPriceChangePct}%` : `${simPriceChangePct}%`}
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min={-80}
+                      max={400}
+                      step={5}
+                      value={simPriceChangePct}
+                      onChange={(e) => setSimPriceChangePct(Number(e.target.value))}
+                      className="w-full accent-cyan-400"
+                    />
+                  </label>
+                  <label className="space-y-1">
+                    <div className="flex justify-between text-slate-400">
+                      <span>24h Pool Vol (XRP)</span>
+                      <span className="text-cyan-300">{formatCompactNumber(simDailyVolXrp)}</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={5000}
+                      max={2000000}
+                      step={5000}
+                      value={simDailyVolXrp}
+                      onChange={(e) => setSimDailyVolXrp(Number(e.target.value))}
+                      className="w-full accent-violet-400"
+                    />
+                  </label>
+                  <label className="space-y-1">
+                    <div className="flex justify-between text-slate-400">
+                      <span>Horizon</span>
+                      <span className="text-white">{simHoldingDays}d</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={7}
+                      max={365}
+                      step={1}
+                      value={simHoldingDays}
+                      onChange={(e) => setSimHoldingDays(Number(e.target.value))}
+                      className="w-full accent-amber-400"
+                    />
+                  </label>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2 font-mono text-[11px]">
+                  <div className="rounded-lg bg-slate-950/75 border border-slate-800 p-2">
+                    <div className="text-[9px] text-slate-400">Impermanent Loss</div>
+                    <div className="text-amber-300 font-bold tabular-nums">
+                      {lpSimResult.impermanentLossPct}% ({lpSimResult.impermanentLossXrp.toFixed(1)} XRP)
+                    </div>
+                  </div>
+                  <div className="rounded-lg bg-slate-950/75 border border-slate-800 p-2">
+                    <div className="text-[9px] text-slate-400">Fee Yield ({simHoldingDays}d)</div>
+                    <div className="text-emerald-300 font-bold tabular-nums">
+                      +{lpSimResult.projectedFeeYieldXrp.toFixed(1)} XRP
+                    </div>
+                  </div>
+                  <div className="rounded-lg bg-slate-950/75 border border-slate-800 p-2">
+                    <div className="text-[9px] text-slate-400">Net vs. HODL</div>
+                    <div
+                      className={`font-bold tabular-nums ${
+                        lpSimResult.netVsHodlXrp >= 0 ? 'text-emerald-300' : 'text-rose-300'
+                      }`}
+                    >
+                      {lpSimResult.netVsHodlXrp >= 0 ? '+' : ''}
+                      {lpSimResult.netVsHodlXrp.toFixed(1)} XRP
+                    </div>
+                  </div>
+                </div>
+
+                <div className="text-[10px] font-mono text-slate-400 flex justify-between">
+                  <span>Pool Share: {lpSimResult.poolSharePct.toFixed(3)}%</span>
+                  <span>
+                    IL Break-Even:{' '}
+                    <strong className="text-cyan-200">
+                      {lpSimResult.breakEvenDays === null
+                        ? '∞'
+                        : lpSimResult.breakEvenDays === 0
+                          ? 'Immediate'
+                          : `${lpSimResult.breakEvenDays} days`}
+                    </strong>
+                  </span>
+                </div>
+              </div>
 
               {/* Interactive CLOB Depth Wall & AMM Constant-Product Curve Canvas */}
               <DexDepthCanvas

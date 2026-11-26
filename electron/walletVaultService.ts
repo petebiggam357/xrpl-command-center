@@ -487,6 +487,85 @@ export function buildXrplTransactionFromIntent(intent: WalletTxIntent): {
       };
     }
 
+    case 'PaymentChannelCreate': {
+      if (!isValidClassicAddress(intent.destination.trim())) {
+        throw new Error('Invalid payment channel destination r-address');
+      }
+      const pub = intent.publicKeyHex.trim().toUpperCase();
+      if (!/^(ED|02|03)[0-9A-F]{64}$/.test(pub)) {
+        throw new Error('PublicKey must be a 66-char hex XRPL public key (ED..., 02..., or 03...)');
+      }
+      const drops = xrpToDropsString(intent.amountXrp);
+      const settleDelay = Math.max(60, Math.floor(intent.settleDelaySec || 3600));
+      const tx: Record<string, unknown> = {
+        TransactionType: 'PaymentChannelCreate',
+        Account: intent.account,
+        Destination: intent.destination.trim(),
+        Amount: drops,
+        SettleDelay: settleDelay,
+        PublicKey: pub,
+      };
+      if (intent.cancelAfterUnixMs) {
+        tx.CancelAfter = unixMsToRippleTime(intent.cancelAfterUnixMs);
+      }
+      if (intent.destinationTag !== undefined && Number.isInteger(intent.destinationTag) && intent.destinationTag >= 0) {
+        tx.DestinationTag = intent.destinationTag;
+      }
+      return {
+        tx,
+        summaryLines: [
+          { label: 'Action', value: 'Create Streaming Payment Channel' },
+          { label: 'Destination', value: intent.destination.trim() },
+          { label: 'Channel Deposit', value: `${dropsToXrpString(drops, 6)} XRP` },
+          { label: 'Settle Delay', value: `${settleDelay}s` },
+        ],
+      };
+    }
+
+    case 'PaymentChannelFund': {
+      const chId = intent.channelId.trim().toUpperCase();
+      if (!/^[0-9A-F]{64}$/.test(chId)) {
+        throw new Error('Channel ID must be a 64-character hex string');
+      }
+      const drops = xrpToDropsString(intent.amountXrp);
+      const tx: Record<string, unknown> = {
+        TransactionType: 'PaymentChannelFund',
+        Account: intent.account,
+        Channel: chId,
+        Amount: drops,
+      };
+      if (intent.expirationUnixMs) {
+        tx.Expiration = unixMsToRippleTime(intent.expirationUnixMs);
+      }
+      return {
+        tx,
+        summaryLines: [
+          { label: 'Action', value: 'Top Up Payment Channel' },
+          { label: 'Channel ID', value: `${chId.slice(0, 12)}…` },
+          { label: 'Added XRP', value: `${dropsToXrpString(drops, 6)} XRP` },
+        ],
+      };
+    }
+
+    case 'SetRegularKey': {
+      const rk = intent.regularKey?.trim();
+      if (rk && !isValidClassicAddress(rk)) {
+        throw new Error('Invalid RegularKey classic r-address');
+      }
+      const tx: Record<string, unknown> = {
+        TransactionType: 'SetRegularKey',
+        Account: intent.account,
+        ...(rk ? { RegularKey: rk } : {}),
+      };
+      return {
+        tx,
+        summaryLines: [
+          { label: 'Action', value: rk ? 'Assign / Rotate RegularKey' : 'Remove Active RegularKey' },
+          { label: 'RegularKey', value: rk ?? '(Removed — reverts to Master Key)' },
+        ],
+      };
+    }
+
     case 'NFTokenMint': {
       const flags = (intent.burnable ? 0x00000001 : 0) | (intent.transferable ? 0x00000008 : 0);
       const transferFeeUnits = intent.transferable

@@ -557,6 +557,28 @@ export type WalletTxIntent =
       checkId: string;
     }
   | {
+      kind: 'PaymentChannelCreate';
+      account: string;
+      destination: string;
+      amountXrp: string;
+      settleDelaySec: number;
+      publicKeyHex: string;
+      cancelAfterUnixMs?: number;
+      destinationTag?: number;
+    }
+  | {
+      kind: 'PaymentChannelFund';
+      account: string;
+      channelId: string;
+      amountXrp: string;
+      expirationUnixMs?: number;
+    }
+  | {
+      kind: 'SetRegularKey';
+      account: string;
+      regularKey?: string;
+    }
+  | {
       kind: 'NFTokenMint';
       account: string;
       uriText: string;

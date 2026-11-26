@@ -1,7 +1,8 @@
 import React, { useMemo, useState } from 'react';
-import { BellPlus, BookPlus, Code2, Loader2, MessageSquareText, X } from 'lucide-react';
+import { BellPlus, BookPlus, Code2, Loader2, MessageSquareText, Share2, X } from 'lucide-react';
 import { decodeXrplMemos, resolveAddressLabel } from '../shared/betaUtils';
-import { shortenAddress } from '../shared/xrplCodec';
+import { buildAccountFlowGraph } from '../shared/v024Utils';
+import { formatCompactNumber, shortenAddress } from '../shared/xrplCodec';
 import { useCommandStore } from '../store/useCommandStore';
 
 export const InspectorDrawer: React.FC = () => {
@@ -30,6 +31,14 @@ export const InspectorDrawer: React.FC = () => {
         : null,
     [inspectorResult, contacts, vaultAccounts]
   );
+
+  const flowGraph = useMemo(() => {
+    if (inspectorResult?.kind !== 'account' || !inspectorResult.transactions?.length) {
+      return null;
+    }
+    const graph = buildAccountFlowGraph(inspectorResult.query, inspectorResult.transactions, 8);
+    return graph.edges.length > 0 ? graph : null;
+  }, [inspectorResult]);
 
   if (!inspectorOpen) return null;
 
@@ -224,6 +233,122 @@ export const InspectorDrawer: React.FC = () => {
                       <span className="text-slate-200 tabular-nums">{tl.balance}</span>
                     </div>
                   ))}
+                </div>
+              </div>
+            )}
+
+            {flowGraph && (
+              <div className="rounded-xl bg-slate-950/80 border border-cyan-400/25 p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 text-[10px] font-mono uppercase text-cyan-300">
+                    <Share2 className="w-3.5 h-3.5" />
+                    Account Fund-Flow Graph (Click node to hop)
+                  </div>
+                  <div className="text-[10px] font-mono text-slate-400">
+                    <span className="text-emerald-300">In {formatCompactNumber(flowGraph.totalInboundXrp)}</span> •{' '}
+                    <span className="text-cyan-300">Out {formatCompactNumber(flowGraph.totalOutboundXrp)} XRP</span>
+                  </div>
+                </div>
+
+                <svg viewBox="0 0 420 220" className="w-full h-52 rounded-lg bg-slate-950 border border-slate-800/80">
+                  {flowGraph.edges.map((edge, idx) => {
+                    const angle = (idx / flowGraph.edges.length) * Math.PI * 2 - Math.PI / 2;
+                    const cx = 210;
+                    const cy = 110;
+                    const rx = 148;
+                    const ry = 78;
+                    const nx = cx + Math.cos(angle) * rx;
+                    const ny = cy + Math.sin(angle) * ry;
+                    const weight =
+                      flowGraph.maxEdgeVolumeXrp > 0
+                        ? 1.2 + (edge.totalVolumeXrp / flowGraph.maxEdgeVolumeXrp) * 3.5
+                        : 1.5;
+                    const stroke =
+                      edge.direction === 'in'
+                        ? '#34d399'
+                        : edge.direction === 'out'
+                          ? '#22d3ee'
+                          : '#a78bfa';
+                    const cpLabel =
+                      resolveAddressLabel(edge.counterparty, contacts, vaultAccounts)?.label ??
+                      shortenAddress(edge.counterparty, 5, 4);
+
+                    return (
+                      <g
+                        key={edge.counterparty}
+                        onClick={() => void inspectQuery(edge.counterparty)}
+                        className="cursor-pointer group"
+                      >
+                        <line
+                          x1={cx}
+                          y1={cy}
+                          x2={nx}
+                          y2={ny}
+                          stroke={stroke}
+                          strokeOpacity={0.65}
+                          strokeWidth={weight}
+                        />
+                        <circle
+                          cx={nx}
+                          cy={ny}
+                          r={14}
+                          fill="#0f172a"
+                          stroke={stroke}
+                          strokeWidth={1.6}
+                        />
+                        <text
+                          x={nx}
+                          y={ny + 3}
+                          textAnchor="middle"
+                          fontSize="8"
+                          fill="#e2e8f0"
+                          fontFamily="monospace"
+                        >
+                          {edge.txCount}tx
+                        </text>
+                        <text
+                          x={nx}
+                          y={ny + 24}
+                          textAnchor="middle"
+                          fontSize="8.5"
+                          fill="#94a3b8"
+                          fontFamily="monospace"
+                        >
+                          {cpLabel.slice(0, 14)}
+                        </text>
+                      </g>
+                    );
+                  })}
+
+                  {/* Center Inspected Account Node */}
+                  <circle cx={210} cy={110} r={22} fill="#082f49" stroke="#22d3ee" strokeWidth={2} />
+                  <text
+                    x={210}
+                    y={108}
+                    textAnchor="middle"
+                    fontSize="8"
+                    fontWeight="bold"
+                    fill="#67e8f9"
+                    fontFamily="monospace"
+                  >
+                    CENTER
+                  </text>
+                  <text
+                    x={210}
+                    y={119}
+                    textAnchor="middle"
+                    fontSize="7"
+                    fill="#cbd5e1"
+                    fontFamily="monospace"
+                  >
+                    {shortenAddress(flowGraph.centerAccount, 4, 3)}
+                  </text>
+                </svg>
+
+                <div className="flex items-center justify-between text-[10px] font-mono text-slate-500">
+                  <span className="text-emerald-300">● Inbound</span>
+                  <span className="text-cyan-300">● Outbound</span>
+                  <span className="text-violet-300">● Bidirectional</span>
                 </div>
               </div>
             )}
