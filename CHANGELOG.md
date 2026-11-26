@@ -2,6 +2,17 @@
 
 All notable changes to **XRPL Command Center** are documented in this file.
 
+## [0.2.1-beta] - 2026-11-26
+
+### Added
+- **XRPL Token Launcher & Guided 5-Step Wizard (`Token Launcher` tab + `Ctrl+K` quick-jump):**
+  - Supports both **Classic XRPL IOUs** (Issuer + Distributor two-wallet architecture) and **XLS-33 Multi-Purpose Tokens (`MPT`)** with 1-click presets (`Community / Meme Token`, `Regulated Stablecoin / RWA`, `Institutional MPT`).
+  - Live currency code validation & canonical 3-char / 160-bit 40-hex encoding (`validateCurrencyCode`), `TransferRate` (`0–100%`) and `TickSize` (`0` or `3–15`) encoding, and distinct-wallet safety guards for IOU issuance.
+  - Extended `AccountSet` transaction builder in `WalletVaultService` to support `TransferRate`, `TickSize`, `asfNoFreeze` (`SetFlag: 6`), and `asfRequireAuth` (`SetFlag: 2`) alongside `asfDefaultRipple`, `asfRequireDest`, `asfAllowTrustLineClawback`, and `Domain`.
+  - Optional **XLS-30 AMM Liquidity Pool** seeding (`AMMCreate`) with live initial price, tokens/XRP, and implied FDV (XRP + USD) preview, plus live `/.well-known/xrp-ledger.toml` generation & linting.
+  - Itemized XRP reserve & network fee estimator and step-by-step on-ledger execution checklist integrated directly with `TxConfirmModal` (Rust Vault, Ledger USB, Air-Gapped QR, Multi-Sig).
+- **Verification:** Added `tests/tokenLauncher.test.ts` (8 new unit tests; **50/50** total Vitest tests passing across 11 suites).
+
 ## [0.2.0-beta] - 2026-11-25
 
 ### Added

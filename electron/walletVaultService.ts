@@ -183,7 +183,11 @@ export function buildXrplTransactionFromIntent(intent: WalletTxIntent): {
         throw new Error('Invalid token issuer r-address');
       }
       const currency = encodeCurrencyCode(intent.currency);
-      const flags = intent.allowRippling ? 0x00040000 : 0x00020000;
+      const flags = intent.authorizeTrustLine
+        ? 0x00010000
+        : intent.allowRippling
+          ? 0x00040000
+          : 0x00020000;
       const tx: Record<string, unknown> = {
         TransactionType: 'TrustSet',
         Account: intent.account,
@@ -197,10 +201,24 @@ export function buildXrplTransactionFromIntent(intent: WalletTxIntent): {
       return {
         tx,
         summaryLines: [
-          { label: 'Action', value: Number(intent.limit) === 0 ? 'Remove TrustLine' : 'Set TrustLine' },
+          {
+            label: 'Action',
+            value: intent.authorizeTrustLine
+              ? 'Authorize Holder TrustLine (tfSetfAuth)'
+              : Number(intent.limit) === 0
+                ? 'Remove TrustLine'
+                : 'Set TrustLine',
+          },
           { label: 'Asset', value: `${decodeCurrencyCode(currency)} (${intent.issuer.trim()})` },
           { label: 'Limit', value: String(intent.limit).trim() },
-          { label: 'NoRipple', value: intent.allowRippling ? 'Disabled (Rippling ON)' : 'Enabled (Safe Default)' },
+          {
+            label: intent.authorizeTrustLine ? 'Authorization' : 'NoRipple',
+            value: intent.authorizeTrustLine
+              ? 'Authorized (tfSetfAuth)'
+              : intent.allowRippling
+                ? 'Disabled (Rippling ON)'
+                : 'Enabled (Safe Default)',
+          },
         ],
       };
     }
@@ -580,16 +598,38 @@ export function buildXrplTransactionFromIntent(intent: WalletTxIntent): {
       if (intent.domain !== undefined) {
         tx.Domain = intent.domain.trim() ? utf8ToHex(intent.domain.trim().toLowerCase()) : '';
       }
-      // AccountSet SetFlag values: 8 = asfDefaultRipple, 1 = asfRequireDest, 16 = asfAllowTrustLineClawback
+      if (intent.transferRatePercent !== undefined) {
+        const pct = Number(intent.transferRatePercent);
+        if (!Number.isFinite(pct) || pct < 0 || pct > 100) {
+          throw new Error('TransferRate percent must be between 0 and 100');
+        }
+        tx.TransferRate = pct === 0 ? 0 : Math.min(2_000_000_000, Math.round(1_000_000_000 + pct * 10_000_000));
+      }
+      if (intent.tickSize !== undefined) {
+        const ts = Math.floor(Number(intent.tickSize));
+        if (ts !== 0 && (ts < 3 || ts > 15)) {
+          throw new Error('TickSize must be 0 (disabled) or between 3 and 15');
+        }
+        tx.TickSize = ts;
+      }
+      // AccountSet SetFlag values: 1 = asfRequireDest, 2 = asfRequireAuth, 6 = asfNoFreeze, 8 = asfDefaultRipple, 16 = asfAllowTrustLineClawback
       if (intent.enableDefaultRipple) tx.SetFlag = 8;
       else if (intent.enableRequireDest) tx.SetFlag = 1;
       else if (intent.enableAllowClawback) tx.SetFlag = 16;
+      else if (intent.enableNoFreeze) tx.SetFlag = 6;
+      else if (intent.enableRequireAuth) tx.SetFlag = 2;
 
       return {
         tx,
         summaryLines: [
           { label: 'Action', value: 'Update AccountRoot Settings (`AccountSet`)' },
           ...(intent.domain !== undefined ? [{ label: 'Domain', value: intent.domain || '(clear)' }] : []),
+          ...(intent.transferRatePercent !== undefined
+            ? [{ label: 'Transfer Fee', value: `${intent.transferRatePercent}%` }]
+            : []),
+          ...(intent.tickSize !== undefined
+            ? [{ label: 'Tick Size', value: intent.tickSize === 0 ? 'Disabled (0)' : String(intent.tickSize) }]
+            : []),
           ...(tx.SetFlag ? [{ label: 'SetFlag', value: String(tx.SetFlag) }] : []),
         ],
       };

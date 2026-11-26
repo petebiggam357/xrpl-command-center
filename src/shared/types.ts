@@ -5,6 +5,7 @@ export type NavTab =
   | 'globe'
   | 'validators'
   | 'tokens'
+  | 'launcher'
   | 'wallets'
   | 'primitives'
   | 'nodeops'
@@ -469,6 +470,7 @@ export type WalletTxIntent =
       issuer: string;
       limit: string;
       allowRippling?: boolean;
+      authorizeTrustLine?: boolean;
     }
   | {
       kind: 'OfferCreate';
@@ -585,9 +587,13 @@ export type WalletTxIntent =
       kind: 'AccountSet';
       account: string;
       domain?: string;
+      transferRatePercent?: number;
+      tickSize?: number;
       enableDefaultRipple?: boolean;
       enableRequireDest?: boolean;
       enableAllowClawback?: boolean;
+      enableNoFreeze?: boolean;
+      enableRequireAuth?: boolean;
     }
   | {
       kind: 'MPTokenIssuanceCreate';

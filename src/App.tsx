@@ -25,6 +25,9 @@ const ValidatorDeck = lazy(() =>
 const TokenExplorer = lazy(() =>
   import('./components/TokenExplorer').then((m) => ({ default: m.TokenExplorer }))
 );
+const TokenLauncherDeck = lazy(() =>
+  import('./components/TokenLauncherDeck').then((m) => ({ default: m.TokenLauncherDeck }))
+);
 const WalletDeck = lazy(() =>
   import('./components/WalletDeck').then((m) => ({ default: m.WalletDeck }))
 );
@@ -179,6 +182,7 @@ export const App: React.FC = () => {
               {activeTab === 'globe' && <ValidatorGlobe3D />}
               {activeTab === 'validators' && <ValidatorDeck />}
               {activeTab === 'tokens' && <TokenExplorer />}
+              {activeTab === 'launcher' && <TokenLauncherDeck />}
               {activeTab === 'wallets' && <WalletDeck />}
               {activeTab === 'primitives' && <PrimitivesDeck />}
               {activeTab === 'nodeops' && <NodeOpsDeck />}
