@@ -40,7 +40,7 @@ describe('v0.0.2-alpha 5-Track Studio & Analytics Suite', () => {
       maxPeers: 50,
       enablePublicWs: false,
     });
-    expect(mainnet.rippledCfg).toContain('ip = 127.0.0.1');
+    expect(mainnet.rippledCfg).toContain('admin = 127.0.0.1, 172.16.0.0/12');
     expect(mainnet.rippledCfg).toContain('online_delete=2000');
     expect(mainnet.validatorsTxt).toContain('https://vl.xrplf.org');
 
