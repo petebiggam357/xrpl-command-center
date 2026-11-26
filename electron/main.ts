@@ -33,7 +33,7 @@ import { resolveRustSidecarBinaryPath, RustVaultSidecarClient } from './rustVaul
 import { WalletVaultService } from './walletVaultService';
 import { XrplStreamManager } from './xrplStream';
 
-const APP_VERSION = '0.2.6-beta';
+const APP_VERSION = '0.2.7-beta';
 const LEDGER_USB_VENDOR_ID = 0x2c97;
 const TREZOR_USB_VENDOR_IDS = new Set([0x1209, 0x534c]);
 
@@ -412,8 +412,34 @@ function registerIpcHandlers(): void {
     }
   );
 
-  ipcMain.handle('nodeOps:readLogTail', (_evt, filePath: string, maxLines?: number) => {
-    return nodeOpsService.readLogTail(filePath, maxLines);
+  ipcMain.handle('nodeOps:readLogTail', async (_evt, filePath: string, maxLines?: number) => {
+    const primary = await nodeOpsService.readLogTail(filePath, maxLines);
+    if (primary.ok) return primary;
+
+    // Auto-fallback for 1-Click Docker nodes: try managed data/log/debug.log, then docker logs
+    const dockerLogFile = path.join(dockerService.activeDataDir, 'log', 'debug.log');
+    if (dockerLogFile !== filePath) {
+      const fromDockerFile = await nodeOpsService.readLogTail(dockerLogFile, maxLines);
+      if (fromDockerFile.ok) {
+        return {
+          ok: true,
+          lines: [`[Auto-detected Docker log file: ${dockerLogFile}]`, ...fromDockerFile.lines],
+        };
+      }
+    }
+
+    const fromContainer = await dockerService.readLogs(maxLines ?? 120);
+    if (fromContainer.ok && fromContainer.lines.length > 0) {
+      return {
+        ok: true,
+        lines: [
+          `[Auto-streaming live Docker container logs (local file "${filePath}" not found)]`,
+          ...fromContainer.lines,
+        ],
+      };
+    }
+
+    return primary;
   });
 
   ipcMain.handle('docker:getStatus', () => dockerService.getStatus());

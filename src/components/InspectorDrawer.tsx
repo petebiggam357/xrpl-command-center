@@ -1,7 +1,8 @@
 import React, { useMemo, useState } from 'react';
-import { BellPlus, BookPlus, Code2, Loader2, MessageSquareText, Share2, X } from 'lucide-react';
+import { BellPlus, BookPlus, Code2, ExternalLink, Loader2, MessageSquareText, Send, Share2, X } from 'lucide-react';
 import { decodeXrplMemos, resolveAddressLabel } from '../shared/betaUtils';
 import { buildAccountFlowGraph } from '../shared/v024Utils';
+import { buildExternalExplorerUrls } from '../shared/v027Utils';
 import { formatCompactNumber, shortenAddress } from '../shared/xrplCodec';
 import { useCommandStore } from '../store/useCommandStore';
 
@@ -15,6 +16,8 @@ export const InspectorDrawer: React.FC = () => {
   const addContact = useCommandStore((s) => s.addContact);
   const contacts = useCommandStore((s) => s.contacts);
   const vaultAccounts = useCommandStore((s) => s.vaultStatus.accounts);
+  const networkId = useCommandStore((s) => s.streamStatus.networkId);
+  const handoffToWallet = useCommandStore((s) => s.handoffToWallet);
 
   const [showRaw, setShowRaw] = useState(false);
   const [savedNotice, setSavedNotice] = useState<string | null>(null);
@@ -68,6 +71,20 @@ export const InspectorDrawer: React.FC = () => {
         <div className="flex items-center gap-1.5">
           {inspectorResult?.kind === 'account' && (
             <>
+              <button
+                type="button"
+                onClick={() =>
+                  handoffToWallet({
+                    subTab: 'send-trust',
+                    sendDest: inspectorResult.query,
+                  })
+                }
+                className="flex items-center gap-1 px-2 py-1.5 rounded-lg bg-cyan-500/20 border border-cyan-400/50 text-xs font-mono text-cyan-200 hover:bg-cyan-500/30"
+                title="Send XRP or token to this address in Wallets & DeFi"
+              >
+                <Send className="w-3.5 h-3.5" />
+                Send
+              </button>
               <button
                 type="button"
                 onClick={() => {
@@ -140,6 +157,23 @@ export const InspectorDrawer: React.FC = () => {
           </div>
         ) : inspectorResult ? (
           <>
+            {inspectorResult.kind !== 'error' && (
+              <div className="flex flex-wrap items-center gap-1.5">
+                {buildExternalExplorerUrls(networkId, inspectorResult.kind, inspectorResult.query).map((ext) => (
+                  <a
+                    key={ext.url}
+                    href={ext.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-950 border border-slate-800 hover:border-cyan-400/50 text-[10px] font-mono text-slate-300 hover:text-cyan-200"
+                  >
+                    <ExternalLink className="w-3 h-3" />
+                    {ext.label}
+                  </a>
+                ))}
+              </div>
+            )}
+
             {inspectorResult.summary.length > 0 && (
               <div className="grid grid-cols-2 gap-2.5">
                 {inspectorResult.summary.map((item, idx) => (

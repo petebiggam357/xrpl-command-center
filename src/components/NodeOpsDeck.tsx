@@ -29,6 +29,7 @@ import {
   type LedgerDbBackend,
 } from '../shared/studioUtils';
 import type { DockerNodeStatus } from '../shared/types';
+import { diagnoseNodeHealth, NODE_SYNC_STAGES } from '../shared/v027Utils';
 import { shortenAddress } from '../shared/xrplCodec';
 import { useCommandStore } from '../store/useCommandStore';
 
@@ -275,6 +276,11 @@ export const NodeOpsDeck: React.FC = () => {
   const pendingAmendments = (nodeSnapshot?.amendments ?? []).filter((a) => !a.enabled);
   const enabledAmendments = (nodeSnapshot?.amendments ?? []).filter((a) => a.enabled);
 
+  const healthDiagnosis = useMemo(
+    () => diagnoseNodeHealth(nodeSnapshot, dockerStatus),
+    [nodeSnapshot, dockerStatus]
+  );
+
   return (
     <div className="space-y-4">
       {/* Connection & Config Header */}
@@ -430,6 +436,54 @@ export const NodeOpsDeck: React.FC = () => {
           );
         })}
       </div>
+
+      {/* v0.2.7-beta: Node Health Doctor & 5-Stage Sync Tracker */}
+      {subTab === 'overview' && (
+        <div className="hud-panel rounded-xl p-4 space-y-3 border border-cyan-400/25">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.15em] text-cyan-300">
+              <Shield className="w-4 h-4" />
+              Node Health Doctor &amp; Sync Stage
+            </div>
+            <div className="flex items-center gap-1 font-mono text-[10px]">
+              {NODE_SYNC_STAGES.map((st, idx) => (
+                <span
+                  key={st}
+                  className={`px-2 py-0.5 rounded uppercase border ${
+                    idx < healthDiagnosis.stageIndex
+                      ? 'bg-emerald-500/15 border-emerald-400/40 text-emerald-300'
+                      : idx === healthDiagnosis.stageIndex
+                        ? 'bg-cyan-500/20 border-cyan-400 text-cyan-200 font-bold'
+                        : 'bg-slate-950 border-slate-800 text-slate-500'
+                  }`}
+                >
+                  {st}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+            {healthDiagnosis.findings.map((f, idx) => (
+              <div
+                key={idx}
+                className={`p-2.5 rounded-lg border font-mono text-[11px] ${
+                  f.severity === 'error'
+                    ? 'bg-rose-500/10 border-rose-400/40 text-rose-200'
+                    : f.severity === 'warning'
+                      ? 'bg-amber-500/10 border-amber-400/35 text-amber-200'
+                      : f.severity === 'ok'
+                        ? 'bg-emerald-500/10 border-emerald-400/30 text-emerald-200'
+                        : 'bg-slate-950/75 border-slate-800 text-slate-300'
+                }`}
+              >
+                <div className="font-semibold">{f.title}</div>
+                <div className="text-[10px] opacity-85 mt-0.5">{f.detail}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Telemetry KPI Grid when connected */}
       {nodeSnapshot?.connected && subTab === 'overview' && (
@@ -1253,6 +1307,18 @@ export const NodeOpsDeck: React.FC = () => {
                 <RefreshCw className="w-3 h-3" />
                 Reload Tail
               </button>
+              {dockerStatus?.dataDir && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    updateNodeConfig({ logFilePath: `${dockerStatus.dataDir}/log/debug.log` });
+                    setTimeout(() => void refreshNodeLogs(), 50);
+                  }}
+                  className="px-2.5 py-1 rounded bg-emerald-500/15 border border-emerald-400/40 text-[11px] font-mono text-emerald-200 hover:bg-emerald-500/25"
+                >
+                  Use Docker Log
+                </button>
+              )}
             </div>
           </div>
 

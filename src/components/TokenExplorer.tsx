@@ -28,7 +28,7 @@ export const TokenExplorer: React.FC = () => {
   const tokenReportLoading = useCommandStore((s) => s.tokenReportLoading);
   const selectToken = useCommandStore((s) => s.selectToken);
   const inspectQuery = useCommandStore((s) => s.inspectQuery);
-  const setActiveTab = useCommandStore((s) => s.setActiveTab);
+  const handoffToWallet = useCommandStore((s) => s.handoffToWallet);
   const marketPrice = useCommandStore((s) => s.marketPrice);
   const priceAlerts = useCommandStore((s) => s.priceAlerts);
   const addPriceAlert = useCommandStore((s) => s.addPriceAlert);
@@ -105,7 +105,13 @@ export const TokenExplorer: React.FC = () => {
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={() => setActiveTab('wallets')}
+              onClick={() =>
+                handoffToWallet({
+                  subTab: 'dex-amm',
+                  tokenCurrency: selectedToken?.currency,
+                  tokenIssuer: selectedToken?.issuer,
+                })
+              }
               className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/15 border border-emerald-400/40 hover:bg-emerald-500/25 text-xs font-mono text-emerald-200"
             >
               <ArrowLeftRight className="w-3.5 h-3.5" />
@@ -526,7 +532,13 @@ export const TokenExplorer: React.FC = () => {
                     <span className="text-[11px] font-mono text-slate-300">{spreadReport.summary}</span>
                     <button
                       type="button"
-                      onClick={() => setActiveTab('wallets')}
+                      onClick={() =>
+                        handoffToWallet({
+                          subTab: 'dex-amm',
+                          tokenCurrency: tokenOnLedgerReport.currency,
+                          tokenIssuer: tokenOnLedgerReport.issuer,
+                        })
+                      }
                       className="px-2.5 py-1 rounded-lg bg-cyan-500/20 border border-cyan-400/50 text-[11px] font-mono text-cyan-200 hover:bg-cyan-500/30 shrink-0"
                     >
                       Swap / Provide LP →

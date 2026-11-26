@@ -2,6 +2,20 @@
 
 All notable changes to **XRPL Command Center** are documented in this file.
 
+## [0.2.7-beta] - 2026-11-26
+
+### Added & Improved
+- **Smart Cross-Module Handoffs (Zero Copy-Pasting):**
+  - **Tokens & DEX → Wallets:** Clicking **Swap / Provide LP →** automatically switches to `Wallets & DeFi` (`Pro DEX & AMM`) and pre-fills that exact token's currency & issuer.
+  - **Inspector Drawer → Wallets & External Explorers:** Added 1-click **Send** button on inspected accounts (pre-fills destination in `Wallets & DeFi → Send`) plus network-aware **XRPScan / Bithomp / Testnet / Devnet** external links.
+  - **RPC & Replay:** Added 1-click **Use Active Wallet** button to inject the selected wallet address straight into JSON-RPC presets.
+- **Node Health Doctor, 5-Stage Sync Tracker & Auto-Detecting Docker Log Tailer (`My Node Ops`):**
+  - Added automatic **Node Health Doctor** (`diagnoseNodeHealth`) with a 5-stage `disconnected → connected → syncing → tracking → full` bar and actionable diagnostics for Docker RPC reachability, NTP/validator-list sync stalls, peer counts, and disk I/O latency.
+  - Fixed `Local Log Tailer` `ENOENT` on `/var/log/rippled/debug.log` for Docker installs: `nodeOps:readLogTail` now automatically falls back to the managed Docker node's `data/log/debug.log` or live `docker logs`, plus a 1-click **Use Docker Log** button.
+- **Grouped Sidebar Navigation, `Alt+1`…`Alt+9` Shortcuts & Crash-Proof `DeckErrorBoundary`:**
+  - Organized the 13 modules into 3 scannable sidebar groups (**Observe & Telemetry**, **DeFi & Studios**, **Operate & Learn**), added `Alt+1`…`Alt+9` quick-jump shortcuts, and wrapped every lazy-loaded deck in `DeckErrorBoundary` with 1-click **Reload Module** recovery.
+- **Verification:** Added `tests/v027Polish.test.ts` (4 new unit tests; **94/94** total Vitest tests passing across 17 suites).
+
 ## [0.2.6-beta] - 2026-11-26
 
 ### Added

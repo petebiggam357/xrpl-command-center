@@ -1,6 +1,7 @@
 import React, { lazy, Suspense, useEffect } from 'react';
 import { CommandPalette } from './components/CommandPalette';
 import { ConsensusCoreCanvas } from './components/ConsensusCoreCanvas';
+import { DeckErrorBoundary } from './components/DeckErrorBoundary';
 import { InspectorDrawer } from './components/InspectorDrawer';
 import { LedgerRibbon } from './components/LedgerRibbon';
 import { LiveTxFeed } from './components/LiveTxFeed';
@@ -156,6 +157,23 @@ export const App: React.FC = () => {
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
         e.preventDefault();
         useCommandStore.getState().toggleSidebar();
+      } else if (e.altKey && !e.ctrlKey && !e.metaKey && /^[1-9]$/.test(e.key)) {
+        const tabs = [
+          'command',
+          'globe',
+          'validators',
+          'tokens',
+          'launcher',
+          'nftstudio',
+          'vaults',
+          'wallets',
+          'nodeops',
+        ] as const;
+        const target = tabs[Number(e.key) - 1];
+        if (target) {
+          e.preventDefault();
+          useCommandStore.getState().setActiveTab(target);
+        }
       } else if (e.key === 'Escape') {
         const st = useCommandStore.getState();
         if (st.commandPaletteOpen) st.setCommandPaletteOpen(false);
@@ -192,20 +210,22 @@ export const App: React.FC = () => {
           )}
 
           {activeTab !== 'command' && (
-            <Suspense fallback={<DeckFallback />}>
-              {activeTab === 'globe' && <ValidatorGlobe3D />}
-              {activeTab === 'validators' && <ValidatorDeck />}
-              {activeTab === 'tokens' && <TokenExplorer />}
-              {activeTab === 'launcher' && <TokenLauncherDeck />}
-              {activeTab === 'nftstudio' && <NftStudioDeck />}
-              {activeTab === 'vaults' && <VaultLendingDeck />}
-              {activeTab === 'wallets' && <WalletDeck />}
-              {activeTab === 'primitives' && <PrimitivesDeck />}
-              {activeTab === 'rpc' && <DevRpcDeck />}
-              {activeTab === 'nodeops' && <NodeOpsDeck />}
-              {activeTab === 'analytics' && <AnalyticsDeck />}
-              {activeTab === 'education' && <EducationDeck />}
-            </Suspense>
+            <DeckErrorBoundary moduleKey={activeTab}>
+              <Suspense fallback={<DeckFallback />}>
+                {activeTab === 'globe' && <ValidatorGlobe3D />}
+                {activeTab === 'validators' && <ValidatorDeck />}
+                {activeTab === 'tokens' && <TokenExplorer />}
+                {activeTab === 'launcher' && <TokenLauncherDeck />}
+                {activeTab === 'nftstudio' && <NftStudioDeck />}
+                {activeTab === 'vaults' && <VaultLendingDeck />}
+                {activeTab === 'wallets' && <WalletDeck />}
+                {activeTab === 'primitives' && <PrimitivesDeck />}
+                {activeTab === 'rpc' && <DevRpcDeck />}
+                {activeTab === 'nodeops' && <NodeOpsDeck />}
+                {activeTab === 'analytics' && <AnalyticsDeck />}
+                {activeTab === 'education' && <EducationDeck />}
+              </Suspense>
+            </DeckErrorBoundary>
           )}
         </main>
       </div>

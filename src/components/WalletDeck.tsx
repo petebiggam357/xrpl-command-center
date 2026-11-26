@@ -74,6 +74,8 @@ export const WalletDeck: React.FC = () => {
   const walletPortfolioLoading = useCommandStore((s) => s.walletPortfolioLoading);
   const walletGroups = useCommandStore((s) => s.walletGroups);
   const setWalletGroup = useCommandStore((s) => s.setWalletGroup);
+  const walletPrefill = useCommandStore((s) => s.walletPrefill);
+  const clearWalletPrefill = useCommandStore((s) => s.clearWalletPrefill);
   const streamStatus = useCommandStore((s) => s.streamStatus);
   const refreshVaultStatus = useCommandStore((s) => s.refreshVaultStatus);
   const selectWallet = useCommandStore((s) => s.selectWallet);
@@ -192,6 +194,22 @@ export const WalletDeck: React.FC = () => {
   useEffect(() => {
     void refreshVaultStatus();
   }, [refreshVaultStatus]);
+
+  // v0.2.7-beta: Apply smart cross-module handoffs from Tokens & DEX or Inspector Drawer
+  useEffect(() => {
+    if (!walletPrefill) return;
+    if (walletPrefill.subTab) setSubTab(walletPrefill.subTab);
+    if (walletPrefill.sendDest) setPayDest(walletPrefill.sendDest);
+    if (walletPrefill.tokenCurrency) {
+      setDexTokenCurrency(walletPrefill.tokenCurrency);
+      setAmmTokenCurrency(walletPrefill.tokenCurrency);
+    }
+    if (walletPrefill.tokenIssuer) {
+      setDexTokenIssuer(walletPrefill.tokenIssuer);
+      setAmmTokenIssuer(walletPrefill.tokenIssuer);
+    }
+    clearWalletPrefill();
+  }, [walletPrefill, clearWalletPrefill]);
 
   const activeAccount = vaultStatus.accounts.find((a) => a.id === selectedWalletId) ?? null;
   const isCustodial = activeAccount?.kind === 'custodial';

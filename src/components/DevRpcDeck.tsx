@@ -66,6 +66,9 @@ export const DevRpcDeck: React.FC = () => {
   const streamStatus = useCommandStore((s) => s.streamStatus);
   const latestLedger = useCommandStore((s) => s.ledgers[0]);
   const inspectQuery = useCommandStore((s) => s.inspectQuery);
+  const vaultAccounts = useCommandStore((s) => s.vaultStatus.accounts);
+  const selectedWalletId = useCommandStore((s) => s.selectedWalletId);
+  const activeWallet = vaultAccounts.find((a) => a.id === selectedWalletId) ?? vaultAccounts[0] ?? null;
 
   const [mode, setMode] = useState<'rpc' | 'timemachine'>('rpc');
 
@@ -322,8 +325,26 @@ export const DevRpcDeck: React.FC = () => {
           {/* Left: Presets + Request Editor + History */}
           <div className="xl:col-span-5 space-y-4">
             <div className="hud-panel rounded-xl p-4 space-y-3">
-              <div className="text-[11px] font-mono uppercase tracking-[0.15em] text-slate-400">
-                1-Click XRPL RPC Presets
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-[11px] font-mono uppercase tracking-[0.15em] text-slate-400">
+                  1-Click XRPL RPC Presets
+                </div>
+                {activeWallet && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const validated = validateRpcJsonParams(paramsText);
+                      const cur = validated.ok ? { ...validated.params } : {};
+                      if ('account_root' in cur) cur.account_root = activeWallet.address;
+                      else cur.account = activeWallet.address;
+                      setParamsText(JSON.stringify(cur, null, 2));
+                    }}
+                    className="px-2 py-0.5 rounded bg-emerald-500/15 border border-emerald-400/40 text-[10px] font-mono text-emerald-200 hover:bg-emerald-500/25"
+                    title={`Inject ${activeWallet.label} (${activeWallet.address}) into JSON params`}
+                  >
+                    Use Active Wallet
+                  </button>
+                )}
               </div>
               <div className="flex flex-wrap gap-1.5">
                 {RPC_PLAYGROUND_PRESETS.map((p) => (

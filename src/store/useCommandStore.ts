@@ -304,6 +304,15 @@ interface CommandState {
   walletGroups: Record<string, WalletGroupTag>;
   sidebarCollapsed: boolean;
 
+  // v0.2.7-beta: Smart Cross-Module Handoff Prefill
+  walletPrefill: {
+    subTab?: 'portfolio' | 'send-trust' | 'contacts' | 'dex-amm' | 'escrow-nft' | 'multisig';
+    sendDest?: string;
+    tokenCurrency?: string;
+    tokenIssuer?: string;
+    nonce: number;
+  } | null;
+
   // Actions
   setActiveTab: (tab: NavTab) => void;
   togglePaused: () => void;
@@ -365,6 +374,15 @@ interface CommandState {
   // v0.2.2-beta Actions
   setWalletGroup: (walletId: string, group: WalletGroupTag) => void;
   toggleSidebar: () => void;
+
+  // v0.2.7-beta Actions
+  handoffToWallet: (prefill: {
+    subTab?: 'portfolio' | 'send-trust' | 'contacts' | 'dex-amm' | 'escrow-nft' | 'multisig';
+    sendDest?: string;
+    tokenCurrency?: string;
+    tokenIssuer?: string;
+  }) => void;
+  clearWalletPrefill: () => void;
 }
 
 const initialCounts: Record<TxCategory, number> = {
@@ -472,6 +490,7 @@ export const useCommandStore = create<CommandState>((set, get) => ({
 
   walletGroups: loadWalletGroups(),
   sidebarCollapsed: loadSidebarCollapsed(),
+  walletPrefill: null,
 
   setActiveTab: (tab) => set({ activeTab: tab }),
   togglePaused: () => set((s) => ({ paused: !s.paused })),
@@ -1148,4 +1167,13 @@ export const useCommandStore = create<CommandState>((set, get) => ({
       }
       return { sidebarCollapsed: next };
     }),
+
+  handoffToWallet: (prefill) =>
+    set({
+      activeTab: 'wallets',
+      inspectorOpen: false,
+      walletPrefill: { ...prefill, nonce: Date.now() },
+    }),
+
+  clearWalletPrefill: () => set({ walletPrefill: null }),
 }));

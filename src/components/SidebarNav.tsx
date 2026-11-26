@@ -20,25 +20,43 @@ import {
 import { shortenAddress } from '../shared/xrplCodec';
 import { type NavTab, useCommandStore } from '../store/useCommandStore';
 
-const NAV_ITEMS: Array<{
-  id: NavTab;
-  label: string;
-  subtitle: string;
-  icon: React.ComponentType<{ className?: string }>;
+const NAV_GROUPS: Array<{
+  title: string;
+  items: Array<{
+    id: NavTab;
+    label: string;
+    subtitle: string;
+    icon: React.ComponentType<{ className?: string }>;
+  }>;
 }> = [
-  { id: 'command', label: 'Command Deck', subtitle: 'Live Pulse & Stream', icon: Radar },
-  { id: 'globe', label: '3D Globe', subtitle: 'Holographic Consensus', icon: Globe2 },
-  { id: 'validators', label: 'Validators', subtitle: 'UNL & Quorum Health', icon: ShieldCheck },
-  { id: 'tokens', label: 'Tokens & DEX', subtitle: 'IOUs, Depth & AMM Curve', icon: Coins },
-  { id: 'launcher', label: 'Token Launcher', subtitle: 'IOU / MPT Launch Wizard', icon: Rocket },
-  { id: 'nftstudio', label: 'NFT Studio', subtitle: 'XLS-20 Mint & Playbook', icon: Image },
-  { id: 'vaults', label: 'Vaults & Lending', subtitle: 'XLS-65 & XLS-66 Credit', icon: Landmark },
-  { id: 'wallets', label: 'Wallets & DeFi', subtitle: 'Vault, Ledger, PathSwap', icon: Wallet },
-  { id: 'primitives', label: 'Institutional', subtitle: 'MPT, Oracles, DID & TOML', icon: Building2 },
-  { id: 'rpc', label: 'RPC & Replay', subtitle: 'JSON-RPC & Time Machine', icon: Terminal },
-  { id: 'nodeops', label: 'My Node Ops', subtitle: 'Docker, Config & Admin', icon: Server },
-  { id: 'analytics', label: 'Analytics & Tray', subtitle: 'SQLite, CSV & Updater', icon: Database },
-  { id: 'education', label: 'XRPL Academy', subtitle: 'Docs, Labs & Guide', icon: GraduationCap },
+  {
+    title: 'Observe & Telemetry',
+    items: [
+      { id: 'command', label: 'Command Deck', subtitle: 'Live Pulse & Mempool', icon: Radar },
+      { id: 'globe', label: '3D Globe', subtitle: 'Holographic Consensus', icon: Globe2 },
+      { id: 'validators', label: 'Validators', subtitle: 'UNL & Quorum Health', icon: ShieldCheck },
+      { id: 'tokens', label: 'Tokens & DEX', subtitle: 'Depth, Spread & AMM IL', icon: Coins },
+    ],
+  },
+  {
+    title: 'DeFi & Studios',
+    items: [
+      { id: 'launcher', label: 'Token Launcher', subtitle: 'IOU / MPT & Airdrops', icon: Rocket },
+      { id: 'nftstudio', label: 'NFT Studio', subtitle: 'XLS-20 Mint & Playbook', icon: Image },
+      { id: 'vaults', label: 'Vaults & Lending', subtitle: 'XLS-65 & XLS-66 Credit', icon: Landmark },
+      { id: 'wallets', label: 'Wallets & DeFi', subtitle: 'Vault, Ledger, PathSwap', icon: Wallet },
+      { id: 'primitives', label: 'Institutional', subtitle: 'MPT, Oracles, DID & TOML', icon: Building2 },
+    ],
+  },
+  {
+    title: 'Operate & Learn',
+    items: [
+      { id: 'rpc', label: 'RPC & Replay', subtitle: 'JSON-RPC & Time Machine', icon: Terminal },
+      { id: 'nodeops', label: 'My Node Ops', subtitle: 'Docker, Doctor & Config', icon: Server },
+      { id: 'analytics', label: 'Analytics & Tray', subtitle: 'SQLite, CSV & Updater', icon: Database },
+      { id: 'education', label: 'XRPL Academy', subtitle: '11 Lessons & Labs', icon: GraduationCap },
+    ],
+  },
 ];
 
 export const SidebarNav: React.FC = () => {
@@ -76,37 +94,41 @@ export const SidebarNav: React.FC = () => {
 
   return (
     <aside className="w-60 shrink-0 border-r border-hudBorder/80 bg-panel/75 backdrop-blur flex flex-col justify-between p-3 overflow-y-auto">
-      <div className="space-y-1.5">
-        <div className="px-2 pb-1 text-[10px] font-mono uppercase tracking-[0.2em] text-slate-500">
-          Mission Control
-        </div>
-        {NAV_ITEMS.map((item) => {
-          const Icon = item.icon;
-          const active = activeTab === item.id;
-          return (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => setActiveTab(item.id)}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left border transition-all ${
-                active
-                  ? 'bg-cyan-500/15 border-cyan-400/50 text-white shadow-glowCyan'
-                  : 'bg-transparent border-transparent text-slate-400 hover:bg-slate-900/70 hover:text-slate-100 hover:border-slate-800'
-              }`}
-            >
-              <Icon className={`w-4 h-4 shrink-0 ${active ? 'text-cyan-300' : 'text-slate-400'}`} />
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold truncate">{item.label}</span>
-                  {item.id === 'nodeops' && nodeSnapshot?.connected && (
-                    <span className="w-2 h-2 rounded-full bg-emerald-400" title="Own Node Online" />
-                  )}
-                </div>
-                <div className="text-[10px] text-slate-500 truncate">{item.subtitle}</div>
-              </div>
-            </button>
-          );
-        })}
+      <div className="space-y-3">
+        {NAV_GROUPS.map((group) => (
+          <div key={group.title} className="space-y-1">
+            <div className="px-2 pb-0.5 text-[9px] font-mono uppercase tracking-[0.2em] text-slate-500">
+              {group.title}
+            </div>
+            {group.items.map((item) => {
+              const Icon = item.icon;
+              const active = activeTab === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => setActiveTab(item.id)}
+                  className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-left border transition-all ${
+                    active
+                      ? 'bg-cyan-500/15 border-cyan-400/50 text-white shadow-glowCyan'
+                      : 'bg-transparent border-transparent text-slate-400 hover:bg-slate-900/70 hover:text-slate-100 hover:border-slate-800'
+                  }`}
+                >
+                  <Icon className={`w-4 h-4 shrink-0 ${active ? 'text-cyan-300' : 'text-slate-400'}`} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold truncate">{item.label}</span>
+                      {item.id === 'nodeops' && nodeSnapshot?.connected && (
+                        <span className="w-2 h-2 rounded-full bg-emerald-400" title="Own Node Online" />
+                      )}
+                    </div>
+                    <div className="text-[10px] text-slate-500 truncate">{item.subtitle}</div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        ))}
       </div>
 
       {/* Watchlist & Live Alerts Section */}

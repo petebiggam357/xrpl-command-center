@@ -461,19 +461,19 @@ export function getXrplBridge(): Omit<XrplDesktopApi, 'isElectron' | 'platform' 
     systemGetTrayUpdaterState: async (): Promise<TrayAndUpdaterSettings> => ({
       minimizeToTray: false,
       nodeWatchdogEnabled: false,
-      currentVersion: '0.2.6-beta',
+      currentVersion: '0.2.7-beta',
       updateState: 'idle',
     }),
     systemUpdateTraySettings: async () => ({
       minimizeToTray: false,
       nodeWatchdogEnabled: false,
-      currentVersion: '0.2.6-beta',
+      currentVersion: '0.2.7-beta',
       updateState: 'idle',
     }),
     systemCheckForUpdates: async () => ({
       minimizeToTray: false,
       nodeWatchdogEnabled: false,
-      currentVersion: '0.2.6-beta',
+      currentVersion: '0.2.7-beta',
       updateState: 'idle',
     }),
 
