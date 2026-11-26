@@ -3,6 +3,7 @@ import type {
   AddressBookContact,
   AmendmentVoteRecord,
   ConsensusPhase,
+  HudThemeId,
   InspectorResult,
   LedgerSnapshot,
   LiveTransaction,
@@ -11,6 +12,8 @@ import type {
   NetworkId,
   NodeConnectionConfig,
   NodeOpsSnapshot,
+  PortfolioSnapshotPoint,
+  PriceAlertRule,
   SavedEndpointProfile,
   StreamStatus,
   TokenOnLedgerReport,
@@ -27,6 +30,7 @@ import type {
   WatchlistEntry,
 } from '../shared/types';
 import { DEFAULT_ADDRESS_BOOK_CONTACTS } from '../shared/betaUtils';
+import { evaluatePriceAlerts } from '../shared/v020Utils';
 import { playAlertPing } from '../services/alertAudio';
 import { getXrplBridge } from '../services/xrplBridge';
 
@@ -42,6 +46,66 @@ const CONTACTS_STORAGE_KEY = 'xrpl-cc-contacts-v1';
 const WHALE_THRESHOLD_STORAGE_KEY = 'xrpl-cc-whale-threshold-v1';
 const QUICKSTART_SEEN_KEY = 'xrpl-cc-quickstart-seen-v1';
 const SAVED_ENDPOINTS_KEY = 'xrpl-cc-endpoints-v1';
+const HUD_THEME_KEY = 'xrpl-cc-theme-v1';
+const PRICE_ALERTS_KEY = 'xrpl-cc-price-alerts-v1';
+const PORTFOLIO_HISTORY_KEY = 'xrpl-cc-portfolio-history-v1';
+const AUTOLOCK_MINUTES_KEY = 'xrpl-cc-autolock-min-v1';
+
+function applyThemeToDom(theme: HudThemeId): void {
+  if (typeof document !== 'undefined') {
+    document.documentElement.dataset.theme = theme;
+  }
+}
+
+function loadHudTheme(): HudThemeId {
+  try {
+    const raw = localStorage.getItem(HUD_THEME_KEY) as HudThemeId | null;
+    if (raw === 'cyber-cyan' || raw === 'emerald-matrix' || raw === 'solar-amber' || raw === 'midnight-contrast') {
+      applyThemeToDom(raw);
+      return raw;
+    }
+  } catch {
+    // ignore
+  }
+  applyThemeToDom('cyber-cyan');
+  return 'cyber-cyan';
+}
+
+function loadPriceAlerts(): PriceAlertRule[] {
+  try {
+    const raw = localStorage.getItem(PRICE_ALERTS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as PriceAlertRule[];
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch {
+    // ignore
+  }
+  return [];
+}
+
+function loadPortfolioHistory(): PortfolioSnapshotPoint[] {
+  try {
+    const raw = localStorage.getItem(PORTFOLIO_HISTORY_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as PortfolioSnapshotPoint[];
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch {
+    // ignore
+  }
+  return [];
+}
+
+function loadAutoLockMinutes(): number {
+  try {
+    const raw = Number(localStorage.getItem(AUTOLOCK_MINUTES_KEY));
+    if (Number.isFinite(raw) && raw >= 1 && raw <= 240) return raw;
+  } catch {
+    // ignore
+  }
+  return 15;
+}
 
 function loadSavedEndpoints(): SavedEndpointProfile[] {
   try {
@@ -206,6 +270,12 @@ interface CommandState {
   soundAlertsEnabled: boolean;
   showPerfHud: boolean;
 
+  // v0.2.0-beta: Themes, Price Alerts, Portfolio History & Auto-Lock
+  hudTheme: HudThemeId;
+  priceAlerts: PriceAlertRule[];
+  portfolioHistory: PortfolioSnapshotPoint[];
+  autoLockMinutes: number;
+
   // Actions
   setActiveTab: (tab: NavTab) => void;
   togglePaused: () => void;
@@ -257,6 +327,12 @@ interface CommandState {
   removeSavedEndpoint: (id: string) => void;
   toggleSoundAlerts: () => void;
   togglePerfHud: () => void;
+
+  // v0.2.0-beta Actions
+  setHudTheme: (theme: HudThemeId) => void;
+  addPriceAlert: (symbol: string, direction: 'above' | 'below', targetUsd: number) => void;
+  removePriceAlert: (id: string) => void;
+  setAutoLockMinutes: (minutes: number) => Promise<void>;
 }
 
 const initialCounts: Record<TxCategory, number> = {
@@ -356,6 +432,11 @@ export const useCommandStore = create<CommandState>((set, get) => ({
   savedEndpoints: loadSavedEndpoints(),
   soundAlertsEnabled: false,
   showPerfHud: false,
+
+  hudTheme: loadHudTheme(),
+  priceAlerts: loadPriceAlerts(),
+  portfolioHistory: loadPortfolioHistory(),
+  autoLockMinutes: loadAutoLockMinutes(),
 
   setActiveTab: (tab) => set({ activeTab: tab }),
   togglePaused: () => set((s) => ({ paused: !s.paused })),
@@ -811,6 +892,36 @@ export const useCommandStore = create<CommandState>((set, get) => ({
     try {
       const snap = await getXrplBridge().fetchMarketPrices();
       set({ marketPrice: snap });
+      const st = get();
+      const triggered = evaluatePriceAlerts(snap.xrpUsd, st.priceAlerts);
+      if (triggered.length > 0 && snap.xrpUsd !== null) {
+        const now = Date.now();
+        const triggeredIds = new Set(triggered.map((t) => t.id));
+        const nextRules = st.priceAlerts.map((r) =>
+          triggeredIds.has(r.id) ? { ...r, triggeredAt: now, active: false } : r
+        );
+        try {
+          localStorage.setItem(PRICE_ALERTS_KEY, JSON.stringify(nextRules));
+        } catch {
+          // ignore
+        }
+        const newAlerts = triggered.map((r) => ({
+          id: `pa-${r.id}-${now}`,
+          title: `Price Alert Hit: ${r.symbol}`,
+          detail: `${r.symbol} crossed ${r.direction} $${r.targetUsd.toFixed(4)} (now $${snap.xrpUsd!.toFixed(4)})`,
+          timestamp: now,
+        }));
+        set((s) => ({
+          priceAlerts: nextRules,
+          alerts: [...newAlerts, ...s.alerts].slice(0, 25),
+        }));
+        if (st.soundAlertsEnabled) {
+          playAlertPing('watchlist');
+        }
+        for (const a of newAlerts) {
+          void getXrplBridge().notifyDesktop({ title: a.title, body: a.detail });
+        }
+      }
     } catch {
       // non-fatal
     }
@@ -871,7 +982,23 @@ export const useCommandStore = create<CommandState>((set, get) => ({
         }
       })
     );
-    set((s) => ({ walletBalancesMap: { ...s.walletBalancesMap, ...updates } }));
+    set((s) => {
+      const nextMap = { ...s.walletBalancesMap, ...updates };
+      const totalXrp = Object.values(nextMap).reduce((sum, v) => sum + (Number.isFinite(v) ? v : 0), 0);
+      const xrpUsd = s.marketPrice.xrpUsd ?? 0;
+      const point: PortfolioSnapshotPoint = {
+        timestamp: Date.now(),
+        totalXrp: Number(totalXrp.toFixed(4)),
+        totalUsd: Number((totalXrp * xrpUsd).toFixed(2)),
+      };
+      const nextHist = [...s.portfolioHistory, point].slice(-90);
+      try {
+        localStorage.setItem(PORTFOLIO_HISTORY_KEY, JSON.stringify(nextHist));
+      } catch {
+        // ignore
+      }
+      return { walletBalancesMap: nextMap, portfolioHistory: nextHist };
+    });
   },
 
   addSavedEndpoint: (label, wsUrl) =>
@@ -909,4 +1036,59 @@ export const useCommandStore = create<CommandState>((set, get) => ({
 
   toggleSoundAlerts: () => set((s) => ({ soundAlertsEnabled: !s.soundAlertsEnabled })),
   togglePerfHud: () => set((s) => ({ showPerfHud: !s.showPerfHud })),
+
+  setHudTheme: (theme) => {
+    applyThemeToDom(theme);
+    try {
+      localStorage.setItem(HUD_THEME_KEY, theme);
+    } catch {
+      // ignore
+    }
+    set({ hudTheme: theme });
+  },
+
+  addPriceAlert: (symbol, direction, targetUsd) =>
+    set((s) => {
+      const cleanTarget = Number(targetUsd);
+      if (!Number.isFinite(cleanTarget) || cleanTarget <= 0) return s;
+      const next: PriceAlertRule[] = [
+        {
+          id: `pa-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+          symbol: symbol.trim().toUpperCase() || 'XRP',
+          direction,
+          targetUsd: cleanTarget,
+          active: true,
+          createdAt: Date.now(),
+        },
+        ...s.priceAlerts,
+      ].slice(0, 20);
+      try {
+        localStorage.setItem(PRICE_ALERTS_KEY, JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return { priceAlerts: next };
+    }),
+
+  removePriceAlert: (id) =>
+    set((s) => {
+      const next = s.priceAlerts.filter((r) => r.id !== id);
+      try {
+        localStorage.setItem(PRICE_ALERTS_KEY, JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return { priceAlerts: next };
+    }),
+
+  setAutoLockMinutes: async (minutes) => {
+    const res = await getXrplBridge().walletSetAutoLockMinutes(minutes);
+    const applied = res.minutes || minutes;
+    try {
+      localStorage.setItem(AUTOLOCK_MINUTES_KEY, String(applied));
+    } catch {
+      // ignore
+    }
+    set({ autoLockMinutes: applied });
+  },
 }));

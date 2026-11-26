@@ -699,6 +699,19 @@ export interface DidResolutionReport {
 // Track 5: SQLite Analytics, CSV Export, System Tray & Updater Types
 // ============================================================================
 
+export interface WalletJournalRow {
+  id: number;
+  timestamp: number;
+  network: string;
+  txType: string;
+  account: string;
+  destination: string;
+  amountDisplay: string;
+  feeDrops: number;
+  hash: string;
+  status: string;
+}
+
 export interface SqliteAnalyticsSummary {
   dbPath: string;
   dbSizeBytes: number;
@@ -707,18 +720,7 @@ export interface SqliteAnalyticsSummary {
   avgTpsRecent: number;
   avgFeeDropsRecent: number;
   peakTxnLedger: { ledgerIndex: number; txnCount: number } | null;
-  recentJournal: Array<{
-    id: number;
-    timestamp: number;
-    network: string;
-    txType: string;
-    account: string;
-    destination: string;
-    amountDisplay: string;
-    feeDrops: number;
-    hash: string;
-    status: string;
-  }>;
+  recentJournal: WalletJournalRow[];
   ledgerSeries: Array<{
     ledgerIndex: number;
     ledgerTime: number;
@@ -815,6 +817,24 @@ export interface SavedEndpointProfile {
   label: string;
   wsUrl: string;
   createdAt: number;
+}
+
+export type HudThemeId = 'cyber-cyan' | 'emerald-matrix' | 'solar-amber' | 'midnight-contrast';
+
+export interface PriceAlertRule {
+  id: string;
+  symbol: string;
+  direction: 'above' | 'below';
+  targetUsd: number;
+  active: boolean;
+  triggeredAt?: number;
+  createdAt: number;
+}
+
+export interface PortfolioSnapshotPoint {
+  timestamp: number;
+  totalXrp: number;
+  totalUsd: number;
 }
 
 export interface XrplDesktopApi {
@@ -933,6 +953,9 @@ export interface XrplDesktopApi {
   encodeXAddress: (classicAddress: string, tag?: number | null, isTestnet?: boolean) => Promise<XAddressEncodeResult>;
   walletExportBackup: () => Promise<VaultBackupResult>;
   walletImportBackup: () => Promise<VaultBackupResult>;
+  walletSetAutoLockMinutes: (minutes: number) => Promise<{ ok: boolean; minutes: number }>;
+  analyticsExportTaxCsv: () => Promise<{ ok: boolean; filePath?: string; rowCount?: number; error?: string }>;
+  systemExportDiagnostics: () => Promise<{ ok: boolean; filePath?: string; cancelled?: boolean; error?: string }>;
 
   notifyDesktop: (payload: DesktopNotificationPayload) => Promise<void>;
   onStreamStatus: (cb: (status: StreamStatus) => void) => () => void;

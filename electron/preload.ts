@@ -26,7 +26,7 @@ function subscribeChannel<T>(channel: string, cb: (payload: T) => void): () => v
 const api: XrplDesktopApi = {
   isElectron: true,
   platform: process.platform,
-  version: '0.1.3-beta',
+  version: '0.2.0-beta',
   connectNetwork: (networkId: NetworkId, customEndpoint?: string) =>
     ipcRenderer.invoke('xrpl:connect', networkId, customEndpoint),
   getStreamStatus: () => ipcRenderer.invoke('xrpl:getStatus'),
@@ -124,6 +124,10 @@ const api: XrplDesktopApi = {
     ipcRenderer.invoke('wallet:encodeXAddress', classicAddress, tag, isTestnet),
   walletExportBackup: () => ipcRenderer.invoke('wallet:exportBackup'),
   walletImportBackup: () => ipcRenderer.invoke('wallet:importBackup'),
+  walletSetAutoLockMinutes: (minutes: number) =>
+    ipcRenderer.invoke('wallet:setAutoLockMinutes', minutes),
+  analyticsExportTaxCsv: () => ipcRenderer.invoke('analytics:exportTaxCsv'),
+  systemExportDiagnostics: () => ipcRenderer.invoke('system:exportDiagnostics'),
 
   notifyDesktop: (payload: DesktopNotificationPayload) => ipcRenderer.invoke('desktop:notify', payload),
   onStreamStatus: (cb: (status: StreamStatus) => void) => subscribeChannel('xrpl:status', cb),

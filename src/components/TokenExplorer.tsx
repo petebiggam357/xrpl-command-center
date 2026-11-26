@@ -1,6 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import {
   AlertTriangle,
+  ArrowLeftRight,
+  BellPlus,
   Coins,
   Droplets,
   Lock,
@@ -8,6 +10,7 @@ import {
   Search,
   ShieldAlert,
   ShieldCheck,
+  Trash2,
 } from 'lucide-react';
 import { formatCompactNumber, shortenAddress } from '../shared/xrplCodec';
 import { useCommandStore } from '../store/useCommandStore';
@@ -23,9 +26,16 @@ export const TokenExplorer: React.FC = () => {
   const tokenReportLoading = useCommandStore((s) => s.tokenReportLoading);
   const selectToken = useCommandStore((s) => s.selectToken);
   const inspectQuery = useCommandStore((s) => s.inspectQuery);
+  const setActiveTab = useCommandStore((s) => s.setActiveTab);
+  const marketPrice = useCommandStore((s) => s.marketPrice);
+  const priceAlerts = useCommandStore((s) => s.priceAlerts);
+  const addPriceAlert = useCommandStore((s) => s.addPriceAlert);
+  const removePriceAlert = useCommandStore((s) => s.removePriceAlert);
 
   const [query, setQuery] = useState('');
   const [sortBy, setSortBy] = useState<'trustlines' | 'volume24hUsd' | 'holders'>('trustlines');
+  const [alertDir, setAlertDir] = useState<'above' | 'below'>('above');
+  const [alertPriceInput, setAlertPriceInput] = useState('');
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -59,15 +69,95 @@ export const TokenExplorer: React.FC = () => {
               </span>
             )}
           </div>
-          <button
-            type="button"
-            onClick={() => void refreshTokens()}
-            disabled={tokensLoading}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-700 hover:border-cyan-400/60 text-xs text-slate-200"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${tokensLoading ? 'animate-spin text-cyan-400' : ''}`} />
-            Sync Index
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setActiveTab('wallets')}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/15 border border-emerald-400/40 hover:bg-emerald-500/25 text-xs font-mono text-emerald-200"
+            >
+              <ArrowLeftRight className="w-3.5 h-3.5" />
+              Quick Swap / Trade
+            </button>
+            <button
+              type="button"
+              onClick={() => void refreshTokens()}
+              disabled={tokensLoading}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-700 hover:border-cyan-400/60 text-xs text-slate-200"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${tokensLoading ? 'animate-spin text-cyan-400' : ''}`} />
+              Sync Index
+            </button>
+          </div>
+        </div>
+
+        {/* Live XRP Price Target Alerts Bar (v0.2.0-beta) */}
+        <div className="mb-3 p-2.5 rounded-xl bg-slate-950/80 border border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="flex items-center gap-1 text-[10px] uppercase text-cyan-300">
+              <BellPlus className="w-3.5 h-3.5" />
+              XRP Price Alerts
+            </span>
+            {marketPrice.xrpUsd !== null && (
+              <span className="text-[11px] text-slate-400">
+                Spot: <strong className="text-white">${marketPrice.xrpUsd.toFixed(4)}</strong>
+              </span>
+            )}
+            <select
+              value={alertDir}
+              onChange={(e) => setAlertDir(e.target.value as 'above' | 'below')}
+              className="rounded bg-slate-900 border border-slate-700 px-2 py-1 text-[11px] text-white"
+            >
+              <option value="above">Crosses Above</option>
+              <option value="below">Drops Below</option>
+            </select>
+            <input
+              type="number"
+              step="0.01"
+              min="0.0001"
+              value={alertPriceInput}
+              onChange={(e) => setAlertPriceInput(e.target.value)}
+              placeholder="Target USD (e.g. 3.00)"
+              className="w-36 rounded bg-slate-900 border border-slate-700 px-2 py-1 text-[11px] text-white"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                const val = Number(alertPriceInput);
+                if (Number.isFinite(val) && val > 0) {
+                  addPriceAlert('XRP', alertDir, val);
+                  setAlertPriceInput('');
+                }
+              }}
+              className="px-2.5 py-1 rounded bg-cyan-500/20 border border-cyan-400/50 text-[11px] text-cyan-200 hover:bg-cyan-500/30"
+            >
+              Set Alert
+            </button>
+          </div>
+          {priceAlerts.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              {priceAlerts.slice(0, 4).map((r) => (
+                <span
+                  key={r.id}
+                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] border ${
+                    r.triggeredAt
+                      ? 'bg-emerald-500/15 border-emerald-400/40 text-emerald-200'
+                      : 'bg-slate-900 border-slate-700 text-slate-300'
+                  }`}
+                >
+                  {r.symbol} {r.direction === 'above' ? '≥' : '≤'} ${r.targetUsd.toFixed(2)}
+                  {r.triggeredAt ? ' ✓' : ''}
+                  <button
+                    type="button"
+                    onClick={() => removePriceAlert(r.id)}
+                    className="text-slate-500 hover:text-rose-300 ml-0.5"
+                    title="Remove alert"
+                  >
+                    <Trash2 className="w-2.5 h-2.5" />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">

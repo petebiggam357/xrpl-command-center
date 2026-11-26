@@ -1,24 +1,46 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   BellRing,
   Database,
   Download,
+  FileDown,
+  Palette,
   RefreshCw,
   ShieldCheck,
   Sparkles,
+  Wrench,
 } from 'lucide-react';
 import { getXrplBridge } from '../services/xrplBridge';
-import type { SqliteAnalyticsSummary, TrayAndUpdaterSettings } from '../shared/types';
+import type { HudThemeId, SqliteAnalyticsSummary, TrayAndUpdaterSettings } from '../shared/types';
+import { computeAssetAllocation } from '../shared/v020Utils';
 import { shortenAddress } from '../shared/xrplCodec';
 import { useCommandStore } from '../store/useCommandStore';
 
 export const AnalyticsDeck: React.FC = () => {
   const inspectQuery = useCommandStore((s) => s.inspectQuery);
+  const hudTheme = useCommandStore((s) => s.hudTheme);
+  const setHudTheme = useCommandStore((s) => s.setHudTheme);
+  const autoLockMinutes = useCommandStore((s) => s.autoLockMinutes);
+  const setAutoLockMinutes = useCommandStore((s) => s.setAutoLockMinutes);
+  const portfolioHistory = useCommandStore((s) => s.portfolioHistory);
+  const walletPortfolio = useCommandStore((s) => s.walletPortfolio);
+  const marketPrice = useCommandStore((s) => s.marketPrice);
+
   const [summary, setSummary] = useState<SqliteAnalyticsSummary | null>(null);
   const [trayState, setTrayState] = useState<TrayAndUpdaterSettings | null>(null);
   const [loading, setLoading] = useState(false);
   const [exportBanner, setExportBanner] = useState<string | null>(null);
   const chartCanvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  const allocation = useMemo(
+    () =>
+      computeAssetAllocation(
+        walletPortfolio?.totalXrp ?? 0,
+        marketPrice.xrpUsd,
+        walletPortfolio?.tokens ?? []
+      ),
+    [walletPortfolio, marketPrice.xrpUsd]
+  );
 
   const loadAll = async () => {
     setLoading(true);
@@ -247,7 +269,7 @@ export const AnalyticsDeck: React.FC = () => {
             <div className="flex items-center justify-between">
               <span className="text-slate-400 flex items-center gap-1.5">
                 <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
-                Installed Release: <strong className="text-white">v{trayState?.currentVersion ?? '0.0.2-alpha'}</strong>
+                Installed Release: <strong className="text-white">v{trayState?.currentVersion ?? '0.2.0-beta'}</strong>
               </span>
               <button
                 type="button"
@@ -264,6 +286,175 @@ export const AnalyticsDeck: React.FC = () => {
               <div className="text-[11px] text-slate-400">{trayState.updateMessage}</div>
             )}
           </div>
+        </div>
+      </div>
+
+      {/* v0.2.0-beta: Appearance, Vault Auto-Lock, Tax CSV & Redacted Diagnostics */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+        <div className="lg:col-span-6 hud-panel rounded-xl p-4 space-y-3">
+          <div className="flex items-center gap-2">
+            <Palette className="w-4 h-4 text-cyan-400" />
+            <h3 className="text-xs font-semibold uppercase tracking-[0.15em] text-cyan-300">
+              HUD Theme, Vault Auto-Lock &amp; Diagnostics
+            </h3>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 font-mono text-[11px]">
+            {(
+              [
+                { id: 'cyber-cyan', label: 'Cyber Cyan' },
+                { id: 'emerald-matrix', label: 'Emerald Matrix' },
+                { id: 'solar-amber', label: 'Solar Amber' },
+                { id: 'midnight-contrast', label: 'Midnight High-Contrast' },
+              ] as Array<{ id: HudThemeId; label: string }>
+            ).map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => setHudTheme(t.id)}
+                className={`px-2.5 py-2 rounded-lg border text-center transition-colors ${
+                  hudTheme === t.id
+                    ? 'bg-cyan-500/20 border-cyan-400/60 text-white'
+                    : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-2 pt-1 font-mono text-xs">
+            <div className="flex items-center gap-2">
+              <span className="text-slate-400">Vault Auto-Lock:</span>
+              <select
+                value={autoLockMinutes}
+                onChange={(e) => void setAutoLockMinutes(Number(e.target.value))}
+                className="rounded-lg bg-slate-950 border border-slate-700 px-2.5 py-1 text-xs text-white"
+              >
+                <option value={5}>5 minutes</option>
+                <option value={15}>15 minutes (Default)</option>
+                <option value={30}>30 minutes</option>
+                <option value={60}>60 minutes</option>
+              </select>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={async () => {
+                  const res = await getXrplBridge().analyticsExportTaxCsv();
+                  if (res.ok) {
+                    setExportBanner(
+                      `Exported CoinTracker/Koinly Tax CSV (${res.rowCount ?? 0} rows) to ${res.filePath}`
+                    );
+                  } else if (res.error && res.error !== 'Export cancelled') {
+                    setExportBanner(`Tax CSV export failed: ${res.error}`);
+                  }
+                }}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-500/15 border border-emerald-400/40 text-[11px] text-emerald-200 hover:bg-emerald-500/25"
+              >
+                <FileDown className="w-3.5 h-3.5" />
+                Tax CSV (Koinly)
+              </button>
+
+              <button
+                type="button"
+                onClick={async () => {
+                  const res = await getXrplBridge().systemExportDiagnostics();
+                  if (res.cancelled) return;
+                  setExportBanner(
+                    res.ok
+                      ? `Exported redacted diagnostics (zero keys/seeds) to ${res.filePath}`
+                      : `Diagnostics export failed: ${res.error ?? 'Unknown error'}`
+                  );
+                }}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-[11px] text-slate-200 hover:border-cyan-400/50"
+              >
+                <Wrench className="w-3.5 h-3.5 text-cyan-400" />
+                Diagnostics
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Portfolio Asset Allocation & Snapshot History */}
+        <div className="lg:col-span-6 hud-panel rounded-xl p-4 space-y-3 font-mono">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-semibold uppercase tracking-[0.15em] text-emerald-300">
+              Active Wallet Asset Allocation &amp; Net Worth Snapshots
+            </h3>
+            <span className="text-[10px] text-slate-400">
+              {portfolioHistory.length} snapshots saved
+            </span>
+          </div>
+
+          {allocation.length === 0 ? (
+            <div className="text-xs text-slate-500 py-4">
+              Select a funded wallet in Wallets &amp; DeFi to visualize your XRP vs. token allocation.
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <div className="h-2.5 rounded-full bg-slate-800 overflow-hidden flex">
+                {allocation.map((slice) => (
+                  <div
+                    key={slice.label}
+                    style={{ width: `${slice.pct}%`, backgroundColor: slice.color }}
+                    title={`${slice.label}: ${slice.pct}%`}
+                  />
+                ))}
+              </div>
+              <div className="flex flex-wrap gap-2 text-[11px]">
+                {allocation.map((slice) => (
+                  <span
+                    key={slice.label}
+                    className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-slate-950 border border-slate-800 text-slate-200"
+                  >
+                    <span className="w-2 h-2 rounded-full" style={{ backgroundColor: slice.color }} />
+                    {slice.label} ({slice.pct}%)
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {portfolioHistory.length >= 2 && (
+            <div className="pt-1 border-t border-slate-800/80">
+              <div className="flex items-center justify-between text-[10px] text-slate-400 mb-1">
+                <span>Portfolio Net Worth Trend (XRP)</span>
+                <span className="text-emerald-300 tabular-nums">
+                  {portfolioHistory[portfolioHistory.length - 1].totalXrp.toLocaleString(undefined, {
+                    maximumFractionDigits: 2,
+                  })}{' '}
+                  XRP
+                </span>
+              </div>
+              <svg viewBox="0 0 240 42" className="w-full h-10 overflow-visible">
+                {(() => {
+                  const vals = portfolioHistory.map((p) => p.totalXrp);
+                  const minV = Math.min(...vals);
+                  const maxV = Math.max(...vals);
+                  const span = Math.max(maxV - minV, 0.0001);
+                  const pts = vals
+                    .map((v, i) => {
+                      const x = (i / (vals.length - 1)) * 240;
+                      const y = 38 - ((v - minV) / span) * 34;
+                      return `${x.toFixed(1)},${y.toFixed(1)}`;
+                    })
+                    .join(' ');
+                  return (
+                    <polyline
+                      fill="none"
+                      stroke="#34d399"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      points={pts}
+                    />
+                  );
+                })()}
+              </svg>
+            </div>
+          )}
         </div>
       </div>
 

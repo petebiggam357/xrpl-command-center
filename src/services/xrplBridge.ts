@@ -461,19 +461,19 @@ export function getXrplBridge(): Omit<XrplDesktopApi, 'isElectron' | 'platform' 
     systemGetTrayUpdaterState: async (): Promise<TrayAndUpdaterSettings> => ({
       minimizeToTray: false,
       nodeWatchdogEnabled: false,
-      currentVersion: '0.1.3-beta',
+      currentVersion: '0.2.0-beta',
       updateState: 'idle',
     }),
     systemUpdateTraySettings: async () => ({
       minimizeToTray: false,
       nodeWatchdogEnabled: false,
-      currentVersion: '0.1.3-beta',
+      currentVersion: '0.2.0-beta',
       updateState: 'idle',
     }),
     systemCheckForUpdates: async () => ({
       minimizeToTray: false,
       nodeWatchdogEnabled: false,
-      currentVersion: '0.1.3-beta',
+      currentVersion: '0.2.0-beta',
       updateState: 'idle',
     }),
 
@@ -492,6 +492,9 @@ export function getXrplBridge(): Omit<XrplDesktopApi, 'isElectron' | 'platform' 
     encodeXAddress: async () => ({ ok: false, error: 'Desktop Electron mode required.' }),
     walletExportBackup: desktopOnlyErr,
     walletImportBackup: desktopOnlyErr,
+    walletSetAutoLockMinutes: async (minutes: number) => ({ ok: true, minutes }),
+    analyticsExportTaxCsv: desktopOnlyErr,
+    systemExportDiagnostics: desktopOnlyErr,
 
     notifyDesktop: (_p: DesktopNotificationPayload) => Promise.resolve(),
     onStreamStatus: (cb) => fb.onStreamStatus(cb),

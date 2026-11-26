@@ -1,6 +1,6 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
-import { Globe2, RotateCcw, Sparkles } from 'lucide-react';
+import { Crosshair, Globe2, RotateCcw, Sparkles } from 'lucide-react';
 import { useCommandStore } from '../store/useCommandStore';
 
 function latLonToVector3(lat: number, lon: number, radius: number): THREE.Vector3 {
@@ -13,23 +13,23 @@ function latLonToVector3(lat: number, lon: number, radius: number): THREE.Vector
 }
 
 // Deterministic fallback geographic coordinates for validators if VHS topology isn't loaded yet
-const FALLBACK_HUBS: Array<[number, number]> = [
-  [37.77, -122.41],
-  [40.71, -74.0],
-  [51.5, -0.12],
-  [50.11, 8.68],
-  [47.37, 8.54],
-  [35.67, 139.65],
-  [1.35, 103.81],
-  [-33.86, 151.2],
-  [37.56, 126.97],
-  [43.65, -79.38],
-  [52.36, 4.9],
-  [48.85, 2.35],
-  [-23.55, -46.63],
-  [19.07, 72.87],
-  [39.04, -77.48],
-  [47.6, -122.33],
+const FALLBACK_HUBS: Array<{ lat: number; lon: number; label: string }> = [
+  { lat: 37.77, lon: -122.41, label: 'San Francisco' },
+  { lat: 40.71, lon: -74.0, label: 'New York' },
+  { lat: 51.5, lon: -0.12, label: 'London' },
+  { lat: 50.11, lon: 8.68, label: 'Frankfurt' },
+  { lat: 47.37, lon: 8.54, label: 'Zurich' },
+  { lat: 35.67, lon: 139.65, label: 'Tokyo' },
+  { lat: 1.35, lon: 103.81, label: 'Singapore' },
+  { lat: -33.86, lon: 151.2, label: 'Sydney' },
+  { lat: 37.56, lon: 126.97, label: 'Seoul' },
+  { lat: 43.65, lon: -79.38, label: 'Toronto' },
+  { lat: 52.36, lon: 4.9, label: 'Amsterdam' },
+  { lat: 48.85, lon: 2.35, label: 'Paris' },
+  { lat: -23.55, lon: -46.63, label: 'Sao Paulo' },
+  { lat: 19.07, lon: 72.87, label: 'Mumbai' },
+  { lat: 39.04, lon: -77.48, label: 'Ashburn' },
+  { lat: 47.6, lon: -122.33, label: 'Seattle' },
 ];
 
 export const ValidatorGlobe3D: React.FC = () => {
@@ -37,6 +37,8 @@ export const ValidatorGlobe3D: React.FC = () => {
   const [autoRotate, setAutoRotate] = useState(true);
   const autoRotateRef = useRef(true);
   autoRotateRef.current = autoRotate;
+  const targetRotationRef = useRef<{ x: number; y: number } | null>(null);
+  const [focusedLabel, setFocusedLabel] = useState<string | null>(null);
 
   const topologyNodes = useCommandStore((s) => s.topologyNodes);
   const validators = useCommandStore((s) => s.validators);
@@ -44,6 +46,36 @@ export const ValidatorGlobe3D: React.FC = () => {
   const tpsEstimate = useCommandStore((s) => s.tpsEstimate);
   const recentValidations = useCommandStore((s) => s.recentValidations);
   const reducedMotion = useCommandStore((s) => s.reducedMotion);
+
+  const focusChips = useMemo(() => {
+    if (topologyNodes.length > 0) {
+      const seen = new Set<string>();
+      const chips: Array<{ id: string; label: string; lat: number; lon: number }> = [];
+      for (const n of topologyNodes) {
+        const label = n.country || n.pubkey.slice(0, 10);
+        if (seen.has(label)) continue;
+        seen.add(label);
+        chips.push({ id: n.pubkey, label, lat: n.lat, lon: n.lon });
+        if (chips.length >= 8) break;
+      }
+      return chips;
+    }
+    return FALLBACK_HUBS.slice(0, 8).map((h) => ({
+      id: h.label,
+      label: h.label,
+      lat: h.lat,
+      lon: h.lon,
+    }));
+  }, [topologyNodes]);
+
+  const focusOnLatLon = (label: string, lat: number, lon: number) => {
+    const v = latLonToVector3(lat, lon, 1);
+    const targetY = Math.atan2(-v.x, v.z);
+    const targetX = Math.max(-1.0, Math.min(1.0, ((lat * Math.PI) / 180) * 0.7));
+    targetRotationRef.current = { x: targetX, y: targetY };
+    setAutoRotate(false);
+    setFocusedLabel(label);
+  };
 
   useEffect(() => {
     const container = mountRef.current;
@@ -117,7 +149,7 @@ export const ValidatorGlobe3D: React.FC = () => {
             lon: n.lon,
             isUnl: i < 38,
           }))
-        : FALLBACK_HUBS.map(([lat, lon], i) => ({ lat, lon, isUnl: i < 12 }));
+        : FALLBACK_HUBS.map((h, i) => ({ lat: h.lat, lon: h.lon, isUnl: i < 12 }));
 
     for (let i = 0; i < sourcePoints.length; i++) {
       const pt = sourcePoints[i];
@@ -191,6 +223,7 @@ export const ValidatorGlobe3D: React.FC = () => {
 
     const onPointerDown = (e: PointerEvent) => {
       dragging = true;
+      targetRotationRef.current = null;
       prevX = e.clientX;
       prevY = e.clientY;
     };
@@ -230,7 +263,17 @@ export const ValidatorGlobe3D: React.FC = () => {
     let rafId = 0;
     const animate = () => {
       rafId = requestAnimationFrame(animate);
-      if (!dragging && autoRotateRef.current && !useCommandStore.getState().reducedMotion) {
+      if (!dragging && targetRotationRef.current) {
+        const target = targetRotationRef.current;
+        const dx = target.x - globeGroup.rotation.x;
+        const TWO_PI = Math.PI * 2;
+        const dy = ((((target.y - globeGroup.rotation.y) + Math.PI) % TWO_PI) + TWO_PI) % TWO_PI - Math.PI;
+        globeGroup.rotation.x += dx * 0.09;
+        globeGroup.rotation.y += dy * 0.09;
+        if (Math.abs(dx) < 0.005 && Math.abs(dy) < 0.005) {
+          targetRotationRef.current = null;
+        }
+      } else if (!dragging && autoRotateRef.current && !useCommandStore.getState().reducedMotion) {
         globeGroup.rotation.y += 0.0024;
       }
 
@@ -290,12 +333,38 @@ export const ValidatorGlobe3D: React.FC = () => {
         </div>
         <button
           type="button"
-          onClick={() => setAutoRotate((v) => !v)}
+          onClick={() => {
+            targetRotationRef.current = null;
+            setFocusedLabel(null);
+            setAutoRotate((v) => !v);
+          }}
           className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-900/90 border border-slate-700/80 text-xs text-slate-300 hover:border-cyan-400/50"
         >
           <RotateCcw className="w-3.5 h-3.5 text-cyan-400" />
           {autoRotate ? 'Auto-Orbit ON' : 'Auto-Orbit OFF'}
         </button>
+      </div>
+
+      {/* Click-to-Focus Validator Hub Chips */}
+      <div className="flex items-center gap-1.5 px-4 py-2 border-b border-slate-800/60 bg-slate-950/75 overflow-x-auto z-10 font-mono text-[11px]">
+        <span className="inline-flex items-center gap-1 text-slate-500 uppercase tracking-wider shrink-0 mr-1">
+          <Crosshair className="w-3 h-3 text-cyan-400" />
+          Focus Hub:
+        </span>
+        {focusChips.map((chip) => (
+          <button
+            key={chip.id}
+            type="button"
+            onClick={() => focusOnLatLon(chip.label, chip.lat, chip.lon)}
+            className={`px-2 py-0.5 rounded-md border shrink-0 transition-colors ${
+              focusedLabel === chip.label
+                ? 'bg-cyan-500/20 border-cyan-400/60 text-cyan-200'
+                : 'bg-slate-900/80 border-slate-800 text-slate-400 hover:text-white hover:border-cyan-500/40'
+            }`}
+          >
+            {chip.label}
+          </button>
+        ))}
       </div>
 
       <div ref={mountRef} className="flex-1 w-full cursor-grab active:cursor-grabbing" />

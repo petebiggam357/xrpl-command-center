@@ -1,7 +1,7 @@
 {
   "name": "xrpl-command-center",
   "productName": "XRPL Command Center",
-  "version": "0.1.3-beta",
+  "version": "0.2.0-beta",
   "description": "Cross-platform real-time XRP Ledger Command Center, visual telemetry engine, token/validator explorer, and self-hosted rippled/Clio node operations console.",
   "main": "dist-electron/main.js",
   "author": "XRPL Command Center Contributors",

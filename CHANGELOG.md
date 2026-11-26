@@ -2,6 +2,24 @@
 
 All notable changes to **XRPL Command Center** are documented in this file.
 
+## [0.2.0-beta] - 2026-11-25
+
+### Added
+- **Track 1 — Portfolio Charts, Asset Allocation & Tax-Ready CSV (`Wallets` + `Analytics`):**
+  - Persisted rolling multi-wallet net worth snapshots (`portfolioHistory`) with an inline SVG trend sparkline and XRP vs. IOU **Asset Allocation** bar in `Analytics`.
+  - Added 1-click **Tax CSV (CoinTracker / Koinly)** export (`analyticsExportTaxCsv`) formatting the local SQLite wallet transaction journal into RFC-4180 tax-ready columns.
+- **Track 2 — In-Place DEX/AMM Quick-Trade & Price Target Alerts (`Tokens & DEX`):**
+  - Added 1-click **Quick Trade** handoff from any inspected token directly into the Wallets & DeFi Studio swap/orderbook flow.
+  - Added local **XRP/USD Price Target Alerts** (`above`/`below`) evaluated live against the market ticker with instant HUD alert notifications.
+- **Track 3 — Live Fee Escalation Meter, 5-Min Trending Tokens & 3D Globe Focus (`Command Deck` + `3D Globe`):**
+  - Added a live **Fee Escalation Meter** (`low` / `elevated` / `high`) and **5-Minute Trending Tokens** strip in the `LedgerRibbon`.
+  - Added **Click-to-Focus Validator Hub Chips** in `ValidatorGlobe3D` with smooth camera/globe slew to major XRPL topology hubs.
+- **Track 4 — HUD Themes, Custom Auto-Lock Timer & Redacted Diagnostics (`Analytics / Settings`):**
+  - Added 4 selectable **HUD Themes** (`Cyber Cyan`, `Emerald Matrix`, `Solar Amber`, `Midnight High-Contrast`) applied globally via CSS variables.
+  - Added configurable **Vault Auto-Lock Timer** (`5m / 15m / 30m / 60m`) synced to the Electron main-process vault timer.
+  - Added 1-click **Redacted Diagnostics Export** (`systemExportDiagnostics`) that strips any accidental Ed25519 (`sEd...`) or secp256k1 (`s...`) XRPL family seeds before saving.
+- **Verification:** Added `tests/v020Features.test.ts` (8 new unit tests; **37/37** total Vitest tests passing).
+
 ## [0.1.3-beta] - 2026-11-25
 
 ### Added

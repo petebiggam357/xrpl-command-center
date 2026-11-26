@@ -29,6 +29,42 @@
   box-shadow: 0 10px 30px rgba(2, 6, 23, 0.55);
 }
 
+/* v0.2.0-beta Selectable HUD Themes */
+[data-theme='emerald-matrix'] .hud-grid-bg {
+  background-color: #030d09;
+  background-image:
+    radial-gradient(circle at 18% 12%, rgba(16, 185, 129, 0.11), transparent 38%),
+    radial-gradient(circle at 82% 85%, rgba(52, 211, 153, 0.08), transparent 42%),
+    linear-gradient(rgba(52, 211, 153, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(52, 211, 153, 0.04) 1px, transparent 1px);
+}
+[data-theme='emerald-matrix'] .hud-panel {
+  background: linear-gradient(180deg, rgba(7, 26, 19, 0.92) 0%, rgba(4, 15, 11, 0.95) 100%);
+  border-color: rgba(52, 211, 153, 0.24);
+}
+
+[data-theme='solar-amber'] .hud-grid-bg {
+  background-color: #0e0904;
+  background-image:
+    radial-gradient(circle at 18% 12%, rgba(245, 158, 11, 0.11), transparent 38%),
+    radial-gradient(circle at 82% 85%, rgba(251, 191, 36, 0.08), transparent 42%),
+    linear-gradient(rgba(251, 191, 36, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(251, 191, 36, 0.04) 1px, transparent 1px);
+}
+[data-theme='solar-amber'] .hud-panel {
+  background: linear-gradient(180deg, rgba(28, 19, 8, 0.92) 0%, rgba(16, 11, 5, 0.96) 100%);
+  border-color: rgba(251, 191, 36, 0.24);
+}
+
+[data-theme='midnight-contrast'] .hud-grid-bg {
+  background-color: #000000;
+  background-image: none;
+}
+[data-theme='midnight-contrast'] .hud-panel {
+  background: #070b14;
+  border-color: rgba(148, 163, 184, 0.35);
+}
+
 .tabular-nums {
   font-variant-numeric: tabular-nums;
 }

@@ -749,7 +749,17 @@ export class WalletVaultService {
   private activePassphraseKey: Buffer | null = null;
   private activeSalt: Buffer | null = null;
   private autoLockTimer: NodeJS.Timeout | null = null;
+  private autoLockMs = AUTO_LOCK_MS;
   private trackedAddresses = new Set<string>();
+
+  public setAutoLockMinutes(minutes: number): number {
+    const clamped = Math.max(1, Math.min(240, Math.round(Number(minutes) || 15)));
+    this.autoLockMs = clamped * 60 * 1000;
+    if (this.autoLockTimer) {
+      this.touchAutoLock();
+    }
+    return clamped;
+  }
 
   constructor(
     private readonly storageDir: string,
@@ -776,7 +786,7 @@ export class WalletVaultService {
     if (this.autoLockTimer) clearTimeout(this.autoLockTimer);
     this.autoLockTimer = setTimeout(() => {
       this.lock();
-    }, AUTO_LOCK_MS);
+    }, this.autoLockMs);
     if (typeof this.autoLockTimer.unref === 'function') {
       this.autoLockTimer.unref();
     }

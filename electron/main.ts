@@ -24,6 +24,7 @@ import type {
   WalletAlgorithm,
   WalletTxIntent,
 } from '../src/shared/types';
+import { buildTaxReadyCsv, redactDiagnosticText } from '../src/shared/v020Utils';
 import { AnalyticsSqliteService } from './analyticsService';
 import { DirectoryService } from './directoryService';
 import { DockerNodeService } from './dockerNodeService';
@@ -32,7 +33,7 @@ import { resolveRustSidecarBinaryPath, RustVaultSidecarClient } from './rustVaul
 import { WalletVaultService } from './walletVaultService';
 import { XrplStreamManager } from './xrplStream';
 
-const APP_VERSION = '0.1.3-beta';
+const APP_VERSION = '0.2.0-beta';
 const LEDGER_USB_VENDOR_ID = 0x2c97;
 const TREZOR_USB_VENDOR_IDS = new Set([0x1209, 0x534c]);
 
@@ -757,6 +758,96 @@ function registerIpcHandlers(): void {
       return {
         ok: false,
         error: err instanceof Error ? err.message : 'Unable to restore encrypted vault backup.',
+      };
+    }
+  });
+
+  ipcMain.handle('wallet:setAutoLockMinutes', (_evt, minutes: number) => {
+    const applied = walletVault.setAutoLockMinutes(minutes);
+    return { ok: true, minutes: applied };
+  });
+
+  ipcMain.handle('analytics:exportTaxCsv', async () => {
+    try {
+      const summary = await analyticsService.getSummary();
+      const csv = buildTaxReadyCsv(summary.recentJournal);
+      const defaultName = `xrpl-tax-journal-${new Date().toISOString().slice(0, 10)}.csv`;
+      const picked = await dialog.showSaveDialog({
+        title: 'Export Tax-Ready XRPL CSV (CoinTracker / Koinly)',
+        defaultPath: path.join(app.getPath('documents'), defaultName),
+        filters: [{ name: 'CSV Spreadsheet', extensions: ['csv'] }],
+      });
+      if (picked.canceled || !picked.filePath) {
+        return { ok: false, error: 'Export cancelled' };
+      }
+      await fs.writeFile(picked.filePath, csv, 'utf8');
+      return { ok: true, filePath: picked.filePath, rowCount: summary.recentJournal.length };
+    } catch (err) {
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : 'Failed to export tax-ready CSV',
+      };
+    }
+  });
+
+  ipcMain.handle('system:exportDiagnostics', async () => {
+    try {
+      const [vaultSt, dockerSt, analyticsSum] = await Promise.all([
+        walletVault.getStatus().catch(() => null),
+        dockerService.getStatus().catch(() => null),
+        analyticsService.getSummary().catch(() => null),
+      ]);
+      const reportObj = {
+        appVersion: APP_VERSION,
+        exportedAt: new Date().toISOString(),
+        platform: process.platform,
+        arch: process.arch,
+        electronVersion: process.versions.electron,
+        nodeVersion: process.versions.node,
+        streamStatus: streamManager.getStatus(),
+        vault: vaultSt
+          ? {
+              initialized: vaultSt.initialized,
+              unlocked: vaultSt.unlocked,
+              backend: vaultSt.backend,
+              kdf: vaultSt.kdf,
+              accountCount: vaultSt.accounts.length,
+            }
+          : null,
+        docker: dockerSt
+          ? {
+              dockerInstalled: dockerSt.dockerInstalled,
+              daemonRunning: dockerSt.daemonRunning,
+              containerExists: dockerSt.containerExists,
+              containerRunning: dockerSt.containerRunning,
+              freeGb: dockerSt.storageInfo?.freeGb ?? null,
+            }
+          : null,
+        analytics: analyticsSum
+          ? {
+              recordedLedgers: analyticsSum.recordedLedgers,
+              recordedTxJournal: analyticsSum.recordedTxJournal,
+              dbSizeBytes: analyticsSum.dbSizeBytes,
+            }
+          : null,
+      };
+
+      const redacted = redactDiagnosticText(JSON.stringify(reportObj, null, 2));
+      const defaultName = `xrpl-command-center-diagnostics-${new Date().toISOString().slice(0, 10)}.json`;
+      const picked = await dialog.showSaveDialog({
+        title: 'Export Redacted Diagnostic Report (Zero Keys/Seeds)',
+        defaultPath: path.join(app.getPath('documents'), defaultName),
+        filters: [{ name: 'JSON Report', extensions: ['json'] }],
+      });
+      if (picked.canceled || !picked.filePath) {
+        return { ok: false, cancelled: true };
+      }
+      await fs.writeFile(picked.filePath, redacted, 'utf8');
+      return { ok: true, filePath: picked.filePath };
+    } catch (err) {
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : 'Unable to export diagnostics.',
       };
     }
   });
