@@ -4,6 +4,8 @@ import {
   Gauge,
   HelpCircle,
   Lock,
+  PanelLeftClose,
+  PanelLeftOpen,
   Pause,
   Play,
   Radio,
@@ -30,11 +32,13 @@ export const TopHudBar: React.FC = () => {
   const reducedMotion = useCommandStore((s) => s.reducedMotion);
   const soundAlertsEnabled = useCommandStore((s) => s.soundAlertsEnabled);
   const showPerfHud = useCommandStore((s) => s.showPerfHud);
+  const sidebarCollapsed = useCommandStore((s) => s.sidebarCollapsed);
   const savedEndpoints = useCommandStore((s) => s.savedEndpoints);
   const togglePaused = useCommandStore((s) => s.togglePaused);
   const toggleReducedMotion = useCommandStore((s) => s.toggleReducedMotion);
   const toggleSoundAlerts = useCommandStore((s) => s.toggleSoundAlerts);
   const togglePerfHud = useCommandStore((s) => s.togglePerfHud);
+  const toggleSidebar = useCommandStore((s) => s.toggleSidebar);
   const addSavedEndpoint = useCommandStore((s) => s.addSavedEndpoint);
   const removeSavedEndpoint = useCommandStore((s) => s.removeSavedEndpoint);
   const connectNetwork = useCommandStore((s) => s.connectNetwork);
@@ -71,6 +75,18 @@ export const TopHudBar: React.FC = () => {
     <header className="h-14 shrink-0 border-b border-hudBorder/80 bg-panel/95 px-4 flex items-center justify-between gap-3 z-30 relative">
       {/* Brand & Network Selector */}
       <div className="flex items-center gap-3 min-w-0">
+        <button
+          type="button"
+          onClick={toggleSidebar}
+          title={sidebarCollapsed ? 'Expand Sidebar (Ctrl+B)' : 'Widescreen Focus Mode (Ctrl+B)'}
+          className="p-1.5 rounded-lg bg-slate-900/90 border border-slate-700/80 text-slate-300 hover:text-cyan-300 hover:border-cyan-400/50 transition-colors"
+        >
+          {sidebarCollapsed ? (
+            <PanelLeftOpen className="w-4 h-4" />
+          ) : (
+            <PanelLeftClose className="w-4 h-4" />
+          )}
+        </button>
         <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-400/20 to-emerald-400/20 border border-cyan-400/40 flex items-center justify-center shadow-glowCyan">
             <Radio className="w-4 h-4 text-cyan-300" />
@@ -81,7 +97,7 @@ export const TopHudBar: React.FC = () => {
                 XRPL Command Center
               </span>
               <span className="px-1.5 py-0.5 rounded bg-cyan-500/15 border border-cyan-400/30 font-mono text-[10px] text-cyan-300">
-                v0.2.1-beta
+                v0.2.2-beta
               </span>
             </div>
             <div className="text-[10px] font-mono text-slate-400 truncate max-w-[230px]">

@@ -2,6 +2,22 @@
 
 All notable changes to **XRPL Command Center** are documented in this file.
 
+## [0.2.2-beta] - 2026-11-26
+
+### Added
+- **Track 1 — Deep Performance, Zero-Flicker 3D Globe & Rust Sidecar Auto-Restart:**
+  - Decoupled live topology/validator node updates from Three.js WebGL renderer setup in `ValidatorGlobe3D` so live refreshes update GPU buffers in-place with zero WebGL teardown, zero flicker, and preserved camera orbit.
+  - Added `document.hidden` render pause in `ValidatorGlobe3D` for low-CPU background operation.
+  - Added bounded exponential-backoff auto-restart and `getHealth()` telemetry in `RustVaultSidecarClient` (`electron/rustVaultClient.ts`).
+- **Track 2 — Batch Airdrop & Multi-Recipient Payout Studio (`Token Launcher` deck):**
+  - Added `BatchAirdropPanel` supporting CSV/TSV upload or paste (`r-address,amount[,destination_tag]`) for native XRP and issued IOU payouts with pre-flight validation, sequential queued signing, progress bar, abort control, and downloadable receipt CSV (`buildPayoutReceiptCsv`).
+- **Track 3 — XRPL Transaction Dry-Run Simulator & Balance-Delta Preview (`TxConfirmModal`):**
+  - Added deterministic pre-flight `simulateTxDryRun` preview inside `TxConfirmModal` projecting `tesSUCCESS` / `tecUNFUNDED_PAYMENT` / `tecINSUFFICIENT_RESERVE` / `tecDST_TAG_NEEDED`, exact XRP delta, reserve delta, and affected ledger objects.
+- **Track 4 — Wallet Portfolio Groups & Widescreen Focus Mode (`Wallets` + `TopHudBar`):**
+  - Added persistent wallet portfolio group tags (`Cold Storage`, `DeFi Hot`, `Issuer / Treasury`, `Testnet`, `General`) with per-group XRP + USD totals and instant group filtering in `WalletDeck`.
+  - Added Full-Bleed Widescreen Focus Mode (collapsible sidebar toggle button in `TopHudBar` + `Ctrl+B` / `Cmd+B` keyboard shortcut).
+- **Verification:** Added `tests/v022OptimizationAndStudio.test.ts` (13 new unit tests; **63/63** total Vitest tests passing across 12 suites).
+
 ## [0.2.1-beta] - 2026-11-26
 
 ### Added

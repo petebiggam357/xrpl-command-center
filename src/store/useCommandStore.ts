@@ -25,6 +25,7 @@ import type {
   ValidationPulse,
   ValidatorRecord,
   VaultStatus,
+  WalletGroupTag,
   WalletPortfolioSnapshot,
   WalletTxIntent,
   WatchlistEntry,
@@ -50,6 +51,8 @@ const HUD_THEME_KEY = 'xrpl-cc-theme-v1';
 const PRICE_ALERTS_KEY = 'xrpl-cc-price-alerts-v1';
 const PORTFOLIO_HISTORY_KEY = 'xrpl-cc-portfolio-history-v1';
 const AUTOLOCK_MINUTES_KEY = 'xrpl-cc-autolock-min-v1';
+const WALLET_GROUPS_KEY = 'xrpl-cc-wallet-groups-v1';
+const SIDEBAR_COLLAPSED_KEY = 'xrpl-cc-sidebar-collapsed-v1';
 
 function applyThemeToDom(theme: HudThemeId): void {
   if (typeof document !== 'undefined') {
@@ -153,6 +156,27 @@ function loadWhaleThreshold(): number {
 function loadQuickStartInitialOpen(): boolean {
   try {
     return localStorage.getItem(QUICKSTART_SEEN_KEY) !== '1';
+  } catch {
+    return false;
+  }
+}
+
+function loadWalletGroups(): Record<string, WalletGroupTag> {
+  try {
+    const raw = localStorage.getItem(WALLET_GROUPS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as Record<string, WalletGroupTag>;
+      if (parsed && typeof parsed === 'object') return parsed;
+    }
+  } catch {
+    // ignore
+  }
+  return {};
+}
+
+function loadSidebarCollapsed(): boolean {
+  try {
+    return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1';
   } catch {
     return false;
   }
@@ -276,6 +300,10 @@ interface CommandState {
   portfolioHistory: PortfolioSnapshotPoint[];
   autoLockMinutes: number;
 
+  // v0.2.2-beta: Wallet Portfolio Groups & Focus Mode
+  walletGroups: Record<string, WalletGroupTag>;
+  sidebarCollapsed: boolean;
+
   // Actions
   setActiveTab: (tab: NavTab) => void;
   togglePaused: () => void;
@@ -333,6 +361,10 @@ interface CommandState {
   addPriceAlert: (symbol: string, direction: 'above' | 'below', targetUsd: number) => void;
   removePriceAlert: (id: string) => void;
   setAutoLockMinutes: (minutes: number) => Promise<void>;
+
+  // v0.2.2-beta Actions
+  setWalletGroup: (walletId: string, group: WalletGroupTag) => void;
+  toggleSidebar: () => void;
 }
 
 const initialCounts: Record<TxCategory, number> = {
@@ -437,6 +469,9 @@ export const useCommandStore = create<CommandState>((set, get) => ({
   priceAlerts: loadPriceAlerts(),
   portfolioHistory: loadPortfolioHistory(),
   autoLockMinutes: loadAutoLockMinutes(),
+
+  walletGroups: loadWalletGroups(),
+  sidebarCollapsed: loadSidebarCollapsed(),
 
   setActiveTab: (tab) => set({ activeTab: tab }),
   togglePaused: () => set((s) => ({ paused: !s.paused })),
@@ -1091,4 +1126,26 @@ export const useCommandStore = create<CommandState>((set, get) => ({
     }
     set({ autoLockMinutes: applied });
   },
+
+  setWalletGroup: (walletId, group) =>
+    set((s) => {
+      const next = { ...s.walletGroups, [walletId]: group };
+      try {
+        localStorage.setItem(WALLET_GROUPS_KEY, JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return { walletGroups: next };
+    }),
+
+  toggleSidebar: () =>
+    set((s) => {
+      const next = !s.sidebarCollapsed;
+      try {
+        localStorage.setItem(SIDEBAR_COLLAPSED_KEY, next ? '1' : '0');
+      } catch {
+        // ignore
+      }
+      return { sidebarCollapsed: next };
+    }),
 }));

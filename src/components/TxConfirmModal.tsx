@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   AlertOctagon,
   AlertTriangle,
   CheckCircle2,
   Code2,
   ExternalLink,
+  FlaskConical,
   KeyRound,
   Loader2,
   QrCode,
@@ -12,6 +13,7 @@ import {
   X,
 } from 'lucide-react';
 import { getXrplBridge } from '../services/xrplBridge';
+import { simulateTxDryRun } from '../shared/v022Utils';
 import { useCommandStore } from '../store/useCommandStore';
 
 export const TxConfirmModal: React.FC = () => {
@@ -21,6 +23,7 @@ export const TxConfirmModal: React.FC = () => {
   const txSubmitting = useCommandStore((s) => s.txSubmitting);
   const lastTxResult = useCommandStore((s) => s.lastTxResult);
   const vaultStatus = useCommandStore((s) => s.vaultStatus);
+  const walletPortfolio = useCommandStore((s) => s.walletPortfolio);
   const pendingTxWalletId = useCommandStore((s) => s.pendingTxWalletId);
   const confirmAndSignPendingTx = useCommandStore((s) => s.confirmAndSignPendingTx);
   const closeTxConfirmModal = useCommandStore((s) => s.closeTxConfirmModal);
@@ -34,10 +37,25 @@ export const TxConfirmModal: React.FC = () => {
   const [unlockPassphrase, setUnlockPassphrase] = useState('');
   const [unlockError, setUnlockError] = useState<string | null>(null);
 
+  const signingAcct = vaultStatus.accounts.find((a) => a.id === pendingTxWalletId);
+  const spendableXrp =
+    walletPortfolio && signingAcct && walletPortfolio.address === signingAcct.address
+      ? walletPortfolio.spendableXrp
+      : null;
+
+  const dryRun = useMemo(() => {
+    if (!pendingTxIntent) return null;
+    const feeDrops = Number(pendingTxPreview?.feeDrops ?? 12) || 12;
+    const destNeedsTag = Boolean(
+      pendingTxPreview?.blockingError?.toLowerCase().includes('destination tag') ||
+        pendingTxPreview?.warnings.some((w) => w.toLowerCase().includes('destination tag'))
+    );
+    return simulateTxDryRun(pendingTxIntent, spendableXrp, feeDrops, destNeedsTag);
+  }, [pendingTxIntent, pendingTxPreview, spendableXrp]);
+
   if (!pendingTxIntent) return null;
 
   const isMainnet = pendingTxPreview?.networkId === 'mainnet';
-  const signingAcct = vaultStatus.accounts.find((a) => a.id === pendingTxWalletId);
   const isCustodial = signingAcct?.kind === 'custodial';
 
   const handleInlineUnlock = async (e: React.FormEvent) => {
@@ -234,6 +252,73 @@ export const TxConfirmModal: React.FC = () => {
                   </span>
                 </div>
               </div>
+
+              {/* Dry-Run Simulation & Balance-Delta Preview */}
+              {dryRun && (
+                <div className="rounded-xl bg-slate-950/90 border border-cyan-500/30 p-3.5 space-y-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5 text-[11px] font-mono font-semibold uppercase tracking-wider text-cyan-300">
+                      <FlaskConical className="w-3.5 h-3.5" />
+                      Dry-Run Balance-Delta Simulation
+                    </div>
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold border ${
+                        dryRun.projectedResult === 'tesSUCCESS'
+                          ? 'bg-emerald-500/15 border-emerald-400/40 text-emerald-300'
+                          : 'bg-amber-500/15 border-amber-400/40 text-amber-200'
+                      }`}
+                    >
+                      {dryRun.projectedResult}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 font-mono text-[11px]">
+                    <div className="rounded-lg bg-slate-900/90 border border-slate-800 px-2.5 py-1.5">
+                      <div className="text-[10px] text-slate-400">Projected XRP Delta</div>
+                      <div
+                        className={`font-semibold tabular-nums ${
+                          dryRun.xrpDelta < 0 ? 'text-rose-300' : 'text-emerald-300'
+                        }`}
+                      >
+                        {dryRun.xrpDelta > 0 ? `+${dryRun.xrpDelta}` : dryRun.xrpDelta} XRP
+                      </div>
+                    </div>
+                    <div className="rounded-lg bg-slate-900/90 border border-slate-800 px-2.5 py-1.5">
+                      <div className="text-[10px] text-slate-400">Reserve Delta</div>
+                      <div
+                        className={`font-semibold tabular-nums ${
+                          dryRun.reserveDeltaXrp > 0
+                            ? 'text-amber-300'
+                            : dryRun.reserveDeltaXrp < 0
+                            ? 'text-emerald-300'
+                            : 'text-slate-300'
+                        }`}
+                      >
+                        {dryRun.reserveDeltaXrp > 0
+                          ? `+${dryRun.reserveDeltaXrp}`
+                          : dryRun.reserveDeltaXrp}{' '}
+                        XRP
+                      </div>
+                    </div>
+                  </div>
+                  {dryRun.objectsAffected.length > 0 && (
+                    <div className="text-[11px] text-slate-300 space-y-0.5">
+                      {dryRun.objectsAffected.map((obj, idx) => (
+                        <div key={idx} className="font-mono text-[10px] text-slate-400">
+                          • {obj}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {dryRun.warnings.map((w, idx) => (
+                    <div
+                      key={idx}
+                      className="text-[11px] text-amber-200 bg-amber-950/40 border border-amber-500/35 rounded-lg px-2.5 py-1.5"
+                    >
+                      {w}
+                    </div>
+                  ))}
+                </div>
+              )}
 
               {/* Air-Gapped QR & Signed Blob Broadcaster */}
               {(airgapMode || !isCustodial) && !pendingTxPreview.blockingError && (

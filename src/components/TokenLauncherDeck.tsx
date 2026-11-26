@@ -28,6 +28,7 @@ import {
 } from '../shared/tokenLauncherUtils';
 import { shortenAddress } from '../shared/xrplCodec';
 import { useCommandStore } from '../store/useCommandStore';
+import { BatchAirdropPanel } from './BatchAirdropPanel';
 
 const STORAGE_KEY = 'xrpl-cc-token-launcher-draft-v1';
 
@@ -942,6 +943,9 @@ export const TokenLauncherDeck: React.FC = () => {
           <ArrowRight className="w-3.5 h-3.5" />
         </button>
       </div>
+
+      {/* Track 2: Batch Airdrop & Multi-Recipient Payout Studio */}
+      <BatchAirdropPanel />
     </div>
   );
 };

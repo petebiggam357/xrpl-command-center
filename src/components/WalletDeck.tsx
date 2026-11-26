@@ -39,7 +39,8 @@ import {
   isXAddress,
   resolveSafeMediaUri,
 } from '../shared/betaUtils';
-import type { PathFindQuote, WalletAlgorithm, WalletCheckEntry } from '../shared/types';
+import type { PathFindQuote, WalletAlgorithm, WalletCheckEntry, WalletGroupTag } from '../shared/types';
+import { computeGroupTotals, WALLET_GROUP_META } from '../shared/v022Utils';
 import { shortenAddress } from '../shared/xrplCodec';
 import { useCommandStore } from '../store/useCommandStore';
 import { AddressBookPanel } from './AddressBookPanel';
@@ -61,6 +62,8 @@ export const WalletDeck: React.FC = () => {
   const selectedWalletId = useCommandStore((s) => s.selectedWalletId);
   const walletPortfolio = useCommandStore((s) => s.walletPortfolio);
   const walletPortfolioLoading = useCommandStore((s) => s.walletPortfolioLoading);
+  const walletGroups = useCommandStore((s) => s.walletGroups);
+  const setWalletGroup = useCommandStore((s) => s.setWalletGroup);
   const streamStatus = useCommandStore((s) => s.streamStatus);
   const refreshVaultStatus = useCommandStore((s) => s.refreshVaultStatus);
   const selectWallet = useCommandStore((s) => s.selectWallet);
@@ -160,6 +163,8 @@ export const WalletDeck: React.FC = () => {
   const activeAccount = vaultStatus.accounts.find((a) => a.id === selectedWalletId) ?? null;
   const isCustodial = activeAccount?.kind === 'custodial';
 
+  const [activeGroupFilter, setActiveGroupFilter] = useState<'all' | WalletGroupTag>('all');
+
   const combinedVaultXrp = useMemo(() => {
     let sum = 0;
     for (const acct of vaultStatus.accounts) {
@@ -167,6 +172,24 @@ export const WalletDeck: React.FC = () => {
     }
     return sum;
   }, [vaultStatus.accounts, walletBalancesMap]);
+
+  const groupTotals = useMemo(
+    () =>
+      computeGroupTotals(
+        vaultStatus.accounts,
+        walletBalancesMap,
+        walletGroups,
+        marketPrice.xrpUsd
+      ),
+    [vaultStatus.accounts, walletBalancesMap, walletGroups, marketPrice.xrpUsd]
+  );
+
+  const filteredAccounts = useMemo(() => {
+    if (activeGroupFilter === 'all') return vaultStatus.accounts;
+    return vaultStatus.accounts.filter(
+      (acct) => (walletGroups[acct.id] ?? 'general') === activeGroupFilter
+    );
+  }, [vaultStatus.accounts, walletGroups, activeGroupFilter]);
 
   const handleSyncAllWalletBalances = async () => {
     setSyncingAllBalances(true);
@@ -809,14 +832,53 @@ export const WalletDeck: React.FC = () => {
             </div>
           )}
 
+          {vaultStatus.accounts.length > 0 && groupTotals.length > 0 && (
+            <div className="space-y-1.5">
+              <div className="flex flex-wrap gap-1">
+                <button
+                  type="button"
+                  onClick={() => setActiveGroupFilter('all')}
+                  className={`px-2 py-0.5 rounded-md border text-[10px] font-mono ${
+                    activeGroupFilter === 'all'
+                      ? 'bg-cyan-500/20 border-cyan-400 text-cyan-200'
+                      : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  All ({vaultStatus.accounts.length})
+                </button>
+                {groupTotals.map((gt) => (
+                  <button
+                    key={gt.group}
+                    type="button"
+                    onClick={() => setActiveGroupFilter(gt.group)}
+                    className={`px-2 py-0.5 rounded-md border text-[10px] font-mono ${
+                      activeGroupFilter === gt.group
+                        ? WALLET_GROUP_META[gt.group].badgeClass
+                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                    }`}
+                    title={
+                      gt.totalUsd !== null
+                        ? `${gt.totalXrp.toLocaleString()} XRP (≈ ${formatUsd(gt.totalUsd)})`
+                        : `${gt.totalXrp.toLocaleString()} XRP`
+                    }
+                  >
+                    {WALLET_GROUP_META[gt.group].label} ({gt.count}) • {gt.totalXrp.toLocaleString(undefined, { maximumFractionDigits: 1 })} XRP
+                    {gt.totalUsd !== null ? ` · ${formatUsd(gt.totalUsd)}` : ''}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {vaultStatus.accounts.length === 0 ? (
             <div className="py-8 px-2 text-center text-xs font-mono text-slate-500">
               Initialize/unlock your vault, connect a Ledger USB device, or add a Watch Address.
             </div>
           ) : (
             <div className="space-y-1.5">
-              {vaultStatus.accounts.map((acct) => {
+              {filteredAccounts.map((acct) => {
                 const selected = acct.id === selectedWalletId;
+                const grp: WalletGroupTag = walletGroups[acct.id] ?? 'general';
                 return (
                   <div
                     key={acct.id}
@@ -827,7 +889,7 @@ export const WalletDeck: React.FC = () => {
                     }`}
                     onClick={() => void selectWallet(acct.id)}
                   >
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5">
                         {acct.kind === 'custodial' ? (
                           <KeyRound className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
@@ -840,6 +902,20 @@ export const WalletDeck: React.FC = () => {
                       </div>
                       <div className="text-[11px] font-mono text-slate-400 mt-0.5">
                         {shortenAddress(acct.address, 8, 6)}
+                      </div>
+                      <div className="mt-1.5" onClick={(e) => e.stopPropagation()}>
+                        <select
+                          aria-label={`Portfolio group for ${acct.label}`}
+                          value={grp}
+                          onChange={(e) => setWalletGroup(acct.id, e.target.value as WalletGroupTag)}
+                          className={`rounded border px-1.5 py-0.5 text-[10px] font-mono focus:outline-none ${WALLET_GROUP_META[grp].badgeClass}`}
+                        >
+                          {(Object.keys(WALLET_GROUP_META) as WalletGroupTag[]).map((k) => (
+                            <option key={k} value={k} className="bg-slate-950 text-slate-200">
+                              {WALLET_GROUP_META[k].label}
+                            </option>
+                          ))}
+                        </select>
                       </div>
                     </div>
                     <button

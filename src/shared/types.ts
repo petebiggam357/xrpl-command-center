@@ -843,6 +843,13 @@ export interface PortfolioSnapshotPoint {
   totalUsd: number;
 }
 
+export type WalletGroupTag =
+  | 'general'
+  | 'cold-storage'
+  | 'defi-hot'
+  | 'issuer-treasury'
+  | 'testnet';
+
 export interface XrplDesktopApi {
   isElectron: true;
   platform: string;

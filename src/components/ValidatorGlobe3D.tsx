@@ -133,6 +133,10 @@ export const ValidatorGlobe3D: React.FC = () => {
   selectedNodeRef.current = selectedNode;
   const [copiedKey, setCopiedKey] = useState(false);
 
+  const ptsGeoRef = useRef<THREE.BufferGeometry | null>(null);
+  const pointsRef = useRef<THREE.Vector3[]>([]);
+  const globeNodesRef = useRef<GlobeNodeItem[]>([]);
+
   const topologyNodes = useCommandStore((s) => s.topologyNodes);
   const validators = useCommandStore((s) => s.validators);
   const latestLedger = useCommandStore((s) => s.ledgers[0]);
@@ -144,6 +148,7 @@ export const ValidatorGlobe3D: React.FC = () => {
     () => buildGlobeNodeItems(topologyNodes, validators, FALLBACK_HUBS),
     [topologyNodes, validators],
   );
+  globeNodesRef.current = globeNodes;
 
   const focusChips = useMemo(() => {
     const seen = new Set<string>();
@@ -175,6 +180,34 @@ export const ValidatorGlobe3D: React.FC = () => {
     setCopiedKey(true);
     setTimeout(() => setCopiedKey(false), 1800);
   };
+
+  // Decoupled live node geometry updater — updates GPU buffers in-place with zero WebGL teardown or camera reset
+  useEffect(() => {
+    const RADIUS = 1.48;
+    const pts: THREE.Vector3[] = [];
+    const nodePositions: number[] = [];
+    const nodeColors: number[] = [];
+    const colorCyan = new THREE.Color('#22d3ee');
+    const colorMint = new THREE.Color('#34d399');
+    const colorViolet = new THREE.Color('#a78bfa');
+
+    for (let i = 0; i < globeNodes.length; i++) {
+      const node = globeNodes[i];
+      const v = latLonToVector3(node.lat, node.lon, RADIUS * 1.016);
+      pts.push(v);
+      nodePositions.push(v.x, v.y, v.z);
+      const c = node.isUnl ? colorMint : node.isValidator ? colorViolet : colorCyan;
+      nodeColors.push(c.r, c.g, c.b);
+    }
+
+    pointsRef.current = pts;
+    const geo = ptsGeoRef.current;
+    if (geo) {
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(nodePositions, 3));
+      geo.setAttribute('color', new THREE.Float32BufferAttribute(nodeColors, 3));
+      geo.computeBoundingSphere();
+    }
+  }, [globeNodes]);
 
   useEffect(() => {
     const container = mountRef.current;
@@ -228,26 +261,29 @@ export const ValidatorGlobe3D: React.FC = () => {
     });
     globeGroup.add(new THREE.Mesh(haloGeo, haloMat));
 
-    // Plot topology nodes + fallback UNL hubs
-    const points: THREE.Vector3[] = [];
+    // Plot topology nodes + fallback UNL hubs (initial population; live updates happen in decoupled effect)
+    const initialNodes = globeNodesRef.current;
+    const initialPts: THREE.Vector3[] = [];
     const nodePositions: number[] = [];
     const nodeColors: number[] = [];
     const colorCyan = new THREE.Color('#22d3ee');
     const colorMint = new THREE.Color('#34d399');
     const colorViolet = new THREE.Color('#a78bfa');
 
-    for (let i = 0; i < globeNodes.length; i++) {
-      const node = globeNodes[i];
+    for (let i = 0; i < initialNodes.length; i++) {
+      const node = initialNodes[i];
       const v = latLonToVector3(node.lat, node.lon, RADIUS * 1.016);
-      points.push(v);
+      initialPts.push(v);
       nodePositions.push(v.x, v.y, v.z);
       const c = node.isUnl ? colorMint : node.isValidator ? colorViolet : colorCyan;
       nodeColors.push(c.r, c.g, c.b);
     }
+    pointsRef.current = initialPts;
 
     const ptsGeo = new THREE.BufferGeometry();
     ptsGeo.setAttribute('position', new THREE.Float32BufferAttribute(nodePositions, 3));
     ptsGeo.setAttribute('color', new THREE.Float32BufferAttribute(nodeColors, 3));
+    ptsGeoRef.current = ptsGeo;
     const ptsMat = new THREE.PointsMaterial({
       size: 0.075,
       vertexColors: true,
@@ -285,9 +321,10 @@ export const ValidatorGlobe3D: React.FC = () => {
     const activeArcs: Array<{ line: THREE.Line; material: THREE.LineBasicMaterial; life: number }> = [];
 
     const spawnArc = (colorHex: number) => {
-      if (points.length < 2 || activeArcs.length > 26) return;
-      const a = points[Math.floor(Math.random() * points.length)];
-      const b = points[Math.floor(Math.random() * points.length)];
+      const pts = pointsRef.current;
+      if (pts.length < 2 || activeArcs.length > 26) return;
+      const a = pts[Math.floor(Math.random() * pts.length)];
+      const b = pts[Math.floor(Math.random() * pts.length)];
       if (a.distanceTo(b) < 0.35) return;
 
       const mid = a.clone().add(b).multiplyScalar(0.5);
@@ -314,7 +351,7 @@ export const ValidatorGlobe3D: React.FC = () => {
     // Subscribe to live store pulses to emit real-time consensus/tx arcs
     let lastPulseCount = 0;
     const unsub = useCommandStore.subscribe((st) => {
-      if (st.reducedMotion || st.paused) return;
+      if (st.reducedMotion || st.paused || document.hidden) return;
       if (st.totalProcessedTxs !== lastPulseCount) {
         lastPulseCount = st.totalProcessedTxs;
         if (Math.random() < 0.45) {
@@ -337,9 +374,12 @@ export const ValidatorGlobe3D: React.FC = () => {
 
       let bestNode: GlobeNodeItem | null = null;
       let bestDistSq = maxDistPx * maxDistPx;
+      const pts = pointsRef.current;
+      const nodes = globeNodesRef.current;
+      const count = Math.min(pts.length, nodes.length);
 
-      for (let i = 0; i < points.length; i++) {
-        tempWorld.copy(points[i]).applyMatrix4(globeGroup.matrixWorld);
+      for (let i = 0; i < count; i++) {
+        tempWorld.copy(pts[i]).applyMatrix4(globeGroup.matrixWorld);
         // Only allow picking nodes on the camera-facing hemisphere
         tempToCam.copy(camera.position).sub(tempWorld);
         if (tempWorld.dot(tempToCam) <= 0) continue;
@@ -352,7 +392,7 @@ export const ValidatorGlobe3D: React.FC = () => {
         const distSq = dx * dx + dy * dy;
         if (distSq < bestDistSq) {
           bestDistSq = distSq;
-          bestNode = globeNodes[i];
+          bestNode = nodes[i];
         }
       }
       return bestNode;
@@ -424,6 +464,7 @@ export const ValidatorGlobe3D: React.FC = () => {
     let pulseTick = 0;
     const animate = () => {
       rafId = requestAnimationFrame(animate);
+      if (document.hidden) return;
       pulseTick += 0.06;
 
       if (!dragging && targetRotationRef.current) {
@@ -485,6 +526,7 @@ export const ValidatorGlobe3D: React.FC = () => {
         a.line.geometry.dispose();
         a.material.dispose();
       }
+      ptsGeoRef.current = null;
       continentTexture?.dispose();
       coreGeo.dispose();
       coreMat.dispose();
@@ -498,7 +540,7 @@ export const ValidatorGlobe3D: React.FC = () => {
       ringMat.dispose();
       renderer.dispose();
     };
-  }, [globeNodes]);
+  }, []);
 
   return (
     <div className="hud-panel rounded-xl relative overflow-hidden h-[calc(100vh-146px)] min-h-[500px] flex flex-col">

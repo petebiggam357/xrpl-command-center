@@ -42,6 +42,10 @@ export class RustVaultSidecarClient {
   private rl: readline.Interface | null = null;
   private seq = 1;
   private pending = new Map<number, PendingCall>();
+  private shuttingDown = false;
+  private restartCount = 0;
+  private lastRestartAt = 0;
+  private restartTimer: NodeJS.Timeout | null = null;
 
   constructor(
     private readonly binaryPath: string,
@@ -52,8 +56,21 @@ export class RustVaultSidecarClient {
     return Boolean(this.proc && !this.proc.killed && this.proc.exitCode === null);
   }
 
+  public getHealth(): { running: boolean; pid: number | null; restartCount: number } {
+    return {
+      running: this.isRunning(),
+      pid: this.proc?.pid ?? null,
+      restartCount: this.restartCount,
+    };
+  }
+
   public start(): void {
     if (this.isRunning()) return;
+    this.shuttingDown = false;
+    if (this.restartTimer) {
+      clearTimeout(this.restartTimer);
+      this.restartTimer = null;
+    }
     fsSync.mkdirSync(this.storageDir, { recursive: true });
 
     const child = spawn(this.binaryPath, ['--vault-dir', this.storageDir], {
@@ -90,10 +107,37 @@ export class RustVaultSidecarClient {
       }
       this.proc = null;
       this.rl = null;
+
+      if (!this.shuttingDown) {
+        const now = Date.now();
+        if (now - this.lastRestartAt > 60_000) {
+          this.restartCount = 0;
+        }
+        if (this.restartCount < 5) {
+          this.restartCount += 1;
+          this.lastRestartAt = now;
+          const delayMs = Math.min(5000, 400 * 2 ** (this.restartCount - 1));
+          this.restartTimer = setTimeout(() => {
+            this.restartTimer = null;
+            if (!this.shuttingDown && !this.isRunning()) {
+              try {
+                this.start();
+              } catch {
+                // next call() will retry start
+              }
+            }
+          }, delayMs);
+        }
+      }
     });
   }
 
   public shutdown(): void {
+    this.shuttingDown = true;
+    if (this.restartTimer) {
+      clearTimeout(this.restartTimer);
+      this.restartTimer = null;
+    }
     if (this.rl) {
       this.rl.close();
       this.rl = null;

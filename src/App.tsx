@@ -143,6 +143,9 @@ export const App: React.FC = () => {
         e.preventDefault();
         const st = useCommandStore.getState();
         st.setCommandPaletteOpen(!st.commandPaletteOpen);
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
+        e.preventDefault();
+        useCommandStore.getState().toggleSidebar();
       } else if (e.key === 'Escape') {
         const st = useCommandStore.getState();
         if (st.commandPaletteOpen) st.setCommandPaletteOpen(false);

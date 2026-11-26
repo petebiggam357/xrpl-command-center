@@ -44,10 +44,13 @@ export const SidebarNav: React.FC = () => {
   const removeWatchlistEntry = useCommandStore((s) => s.removeWatchlistEntry);
   const inspectQuery = useCommandStore((s) => s.inspectQuery);
   const nodeSnapshot = useCommandStore((s) => s.nodeSnapshot);
+  const sidebarCollapsed = useCommandStore((s) => s.sidebarCollapsed);
 
   const [addingWatch, setAddingWatch] = useState(false);
   const [watchLabel, setWatchLabel] = useState('');
   const [watchTarget, setWatchTarget] = useState('');
+
+  if (sidebarCollapsed) return null;
 
   const handleAddWatch = (e: React.FormEvent) => {
     e.preventDefault();
