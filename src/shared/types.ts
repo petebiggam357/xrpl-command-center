@@ -6,6 +6,7 @@ export type NavTab =
   | 'validators'
   | 'tokens'
   | 'launcher'
+  | 'nftstudio'
   | 'wallets'
   | 'primitives'
   | 'rpc'
@@ -586,6 +587,7 @@ export type WalletTxIntent =
       transferFeeBps: number;
       transferable: boolean;
       burnable: boolean;
+      onlyXrp?: boolean;
     }
   | {
       kind: 'NFTokenCreateOffer';

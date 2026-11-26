@@ -269,7 +269,7 @@ export const AnalyticsDeck: React.FC = () => {
             <div className="flex items-center justify-between">
               <span className="text-slate-400 flex items-center gap-1.5">
                 <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
-                Installed Release: <strong className="text-white">v{trayState?.currentVersion ?? '0.2.4-beta'}</strong>
+                Installed Release: <strong className="text-white">v{trayState?.currentVersion ?? '0.2.5-beta'}</strong>
               </span>
               <button
                 type="button"

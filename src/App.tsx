@@ -29,6 +29,9 @@ const TokenExplorer = lazy(() =>
 const TokenLauncherDeck = lazy(() =>
   import('./components/TokenLauncherDeck').then((m) => ({ default: m.TokenLauncherDeck }))
 );
+const NftStudioDeck = lazy(() =>
+  import('./components/NftStudioDeck').then((m) => ({ default: m.NftStudioDeck }))
+);
 const WalletDeck = lazy(() =>
   import('./components/WalletDeck').then((m) => ({ default: m.WalletDeck }))
 );
@@ -191,6 +194,7 @@ export const App: React.FC = () => {
               {activeTab === 'validators' && <ValidatorDeck />}
               {activeTab === 'tokens' && <TokenExplorer />}
               {activeTab === 'launcher' && <TokenLauncherDeck />}
+              {activeTab === 'nftstudio' && <NftStudioDeck />}
               {activeTab === 'wallets' && <WalletDeck />}
               {activeTab === 'primitives' && <PrimitivesDeck />}
               {activeTab === 'rpc' && <DevRpcDeck />}

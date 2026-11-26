@@ -567,7 +567,10 @@ export function buildXrplTransactionFromIntent(intent: WalletTxIntent): {
     }
 
     case 'NFTokenMint': {
-      const flags = (intent.burnable ? 0x00000001 : 0) | (intent.transferable ? 0x00000008 : 0);
+      const flags =
+        (intent.burnable ? 0x00000001 : 0) |
+        (intent.onlyXrp ? 0x00000002 : 0) |
+        (intent.transferable ? 0x00000008 : 0);
       const transferFeeUnits = intent.transferable
         ? Math.max(0, Math.min(50_000, Math.round(intent.transferFeeBps * 10)))
         : 0;

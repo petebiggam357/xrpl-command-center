@@ -2,6 +2,17 @@
 
 All notable changes to **XRPL Command Center** are documented in this file.
 
+## [0.2.5-beta] - 2026-11-26
+
+### Added
+- **XLS-20 NFT Studio & Collection Launchpad (`NFT Studio` tab + `Ctrl+K` quick-jump):**
+  - Added lazy-loaded `NftStudioDeck` and pure engine `src/shared/nftStudioUtils.ts` supporting both **Single 1-of-1 Minting** and **Collection Batch Minting** (`1–500` items).
+  - **XLS-24d Metadata Builder, Live Marketplace Card Preview & Preflight Linter:** Build standards-compliant XLS-24d JSON with custom traits, preview IPFS artwork live, validate XRPL's 256-byte URI limit, `tfTransferable` / `tfBurnable` / `tfOnlyXRP` flags (extended in `WalletVaultService`), and royalty (`TransferFee`) rules before minting.
+  - **Collection Batch Minter & XLS-20 `NFTokenPage` Reserve Calculator:** Supports sequential IPFS CIDs (`ipfs://<CID>/1.json`…`N.json`) or CSV + Traits manifests, computes exact 16–32 NFT/page reserve costs + optional offer reserves, exports XLS-24d metadata bundles for IPFS pinning, runs sequential batch minting with abort controls, and exports Mint Receipt CSVs.
+  - **Trait Rarity & Distribution Analyzer + Post-Mint Bulk Sell-Offer & Whitelist Airdrop Queue:** Analyzes trait frequencies, Mythic/Legendary/Rare/Common rankings, and duplicate/uniform trait warnings, plus queues fixed-price `NFTokenCreateOffer` listings or `0 XRP` destination-locked whitelist NFT airdrops.
+  - **Creator Playbook ("What Sells Best on XRPL"):** Curated category breakdown (Utility Passes, Gaming Assets, Phygital/RWA, 1-of-1 Fine Art, Tight-Supply PFPs) with supply/royalty/pricing benchmarks and a persisted 6-step Pre-Launch Checklist.
+- **Verification:** Added `tests/nftStudio.test.ts` (8 new unit tests; **84/84** total Vitest tests passing across 15 suites).
+
 ## [0.2.4-beta] - 2026-11-26
 
 ### Added
