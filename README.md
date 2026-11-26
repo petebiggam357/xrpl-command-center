@@ -26,7 +26,7 @@
 | Module | What You See & Control |
 | :--- | :--- |
 | **Command Deck** | 60fps delta-time HTML5 Canvas **Live Consensus Core** (`OPEN → ESTABLISH → 80% QUORUM → VALIDATED`), 6-lane **Transaction Particle River**, **Whale Radar** (with optional WebAudio synth chime), scrolling **Validated Ledger Chain**, **Live Fee Escalation Meter** & **5-Min Trending Tokens**, live **XRP/USD HUD Ticker**, toggleable **Live FPS / Latency / Heap Perf HUD**, **Saved Custom Node Endpoint Profiles**, and click-to-inspect live transaction tape with human-readable contact labels. |
-| **3D Holographic Globe** | Lazy-loaded interactive **Three.js WebGL2** validator & peer topology globe with drag-to-orbit, zoom, **Click-to-Focus Validator Hub Chips**, and live geodesic arcs pulsing on consensus & transaction activity. |
+| **3D Holographic Globe** | Lazy-loaded interactive **Three.js WebGL2** validator & peer topology globe rendered with offline equirectangular **world continents & coastlines**, drag-to-orbit, zoom, **Click-to-Focus Validator Hub Chips**, **click-to-inspect right-side Node Details drawer** (location, pubkey, domain, version, peers, uptime & agreement), and live geodesic arcs pulsing on consensus & transaction activity. |
 | **Validator Constellation** | Live XRPLF Validator History Service (`data.xrplf.org`) metrics, UNL filters, 1h / 24h / 30d agreement scores, `rippled` version breakdown, live `validationReceived` vote pulses, and **XRPL Amendment Voting Radar** (80% activation progress). |
 | **Tokens, DEX & AMM Explorer** | Global XRPL token index (`s1.xrplmeta.org`) + live-stream discovery + **authoritative on-ledger verification** (`account_info`, `gateway_balances`, `book_offers`, `amm_info`), issuer risk flags (`Blackholed`, `GlobalFreeze`, `NoFreeze`, `Clawback`), **60fps CLOB Depth Wall + AMM `x·y=k` Curve Canvas**, **In-Place DEX/AMM Quick-Trade**, and **XRP/USD Price Target Alerts**. |
 | **Wallets & Pro DeFi Studio** | Process-isolated **Rust Argon2id + AES-256-GCM + Zeroize Vault**, configurable **Auto-Lock Timer (`5m/15m/30m/60m`)**, 1-click encrypted **`.xrplvault` Backup/Restore**, **Offline Printable Cold Recovery Sheet**, **Multi-Wallet Combined Net Worth (XRP + USD)**, **Open-SDK Hardware & Cold Wallet Hub** (**Ledger WebHID USB**, **Trezor Suite Bridge / WebUSB**, **Keystone 3 Pro**, **Tangem**, **D'CENT / Ellipal**, **Xaman**), **Smart Address Book & Exchange Destination-Tag Guard**, **X-Address decode**, live **USD Portfolio & Reserve Meter**, searchable **Tx History + UTF-8 Memo Decoder**, **Visual NFT Gallery**, **Air-Gapped QR**, **Native Multi-Sign**, **Smart Pathfinding Swap**, `OfferCreate`/`Cancel`, `AMMCreate`/`AMMVote`/`Deposit`/`Withdraw`, Escrows, Checks, and **1-Click Testnet Playground**. |
@@ -116,7 +116,7 @@ npm run dev
 ```bash
 cargo test --manifest-path rust-vault/Cargo.toml  # Rust Argon2id + ed25519/secp256k1 unit tests
 npm run typecheck                                 # Strict TS checks for renderer & Electron
-npm test                                          # 37 Vitest tests across 9 suites
+npm test                                          # 42 Vitest tests across 10 suites
 npm run build                                     # Vite + esbuild + staged Rust sidecar
 ```
 
