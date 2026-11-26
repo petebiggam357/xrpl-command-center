@@ -370,8 +370,17 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle('xrpl:getStatus', () => streamManager.getStatus());
 
-  ipcMain.handle('xrpl:rpc', (_evt, command: string, params?: Record<string, unknown>) => {
-    return streamManager.request(command, params);
+  ipcMain.handle('xrpl:rpc', async (_evt, command: string, params?: Record<string, unknown>) => {
+    try {
+      return await streamManager.request(command, params);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        status: 'error',
+        error: 'rpc_error',
+        error_message: msg,
+      };
+    }
   });
 
   ipcMain.handle('xrpl:fetchValidators', (_evt, networkId: NetworkId) => {

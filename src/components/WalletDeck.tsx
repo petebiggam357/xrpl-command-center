@@ -466,6 +466,13 @@ export const WalletDeck: React.FC = () => {
         account: activeAccount.address,
         ledger_index: 'validated',
       });
+      if (res.status === 'error') {
+        setVaultBannerMsg({
+          ok: false,
+          text: String(res.error_message ?? res.error ?? 'Unable to query account_channels'),
+        });
+        return;
+      }
       const result = (res.result ?? res) as Record<string, unknown>;
       const rows = Array.isArray(result.channels) ? result.channels : [];
       setChList(

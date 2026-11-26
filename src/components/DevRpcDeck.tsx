@@ -134,6 +134,23 @@ export const DevRpcDeck: React.FC = () => {
       const res = await getXrplBridge().rpcRequest(cmd, validated.params);
       const elapsed = Math.round(performance.now() - t0);
       setRpcLatencyMs(elapsed);
+      if (res.status === 'error') {
+        const msg = String(res.error_message ?? res.error ?? 'XRPL RPC error');
+        setRpcError(msg);
+        setRpcOutput('');
+        saveHistory([
+          {
+            id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            command: cmd,
+            paramsJson: rawJson,
+            ok: false,
+            latencyMs: elapsed,
+            executedAt: Date.now(),
+          },
+          ...history,
+        ]);
+        return;
+      }
       setRpcOutput(JSON.stringify(res, null, 2));
       saveHistory([
         {
@@ -184,6 +201,11 @@ export const DevRpcDeck: React.FC = () => {
         transactions: true,
         expand: true,
       });
+      if (res.status === 'error') {
+        setLedgerError(String(res.error_message ?? res.error ?? 'Unable to load historical ledger'));
+        setLedgerView(null);
+        return;
+      }
       const result = (res.result ?? res) as Record<string, unknown>;
       const ledger = (result.ledger ?? {}) as Record<string, unknown>;
       const rawTxs = Array.isArray(ledger.transactions) ? ledger.transactions : [];

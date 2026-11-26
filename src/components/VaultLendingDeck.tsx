@@ -75,6 +75,10 @@ export const VaultLendingDeck: React.FC = () => {
         vault_id: id,
         ledger_index: 'validated',
       });
+      if (res.status === 'error') {
+        setInspectError(String(res.error_message ?? res.error ?? 'Vault query failed'));
+        return;
+      }
       const parsed = parseVaultInfoRpc(res, id);
       if (!parsed) {
         setInspectError('Vault not found on this network (or SingleAssetVault amendment not yet active).');
@@ -123,6 +127,10 @@ export const VaultLendingDeck: React.FC = () => {
         index: id,
         ledger_index: 'validated',
       });
+      if (res.status === 'error') {
+        setLoanLookupErr(String(res.error_message ?? res.error ?? 'Ledger entry query failed'));
+        return;
+      }
       setLoanLookupOutput(JSON.stringify(res.result ?? res, null, 2));
     } catch (err) {
       setLoanLookupErr(err instanceof Error ? err.message : String(err));
