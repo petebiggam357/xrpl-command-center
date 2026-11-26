@@ -461,19 +461,19 @@ export function getXrplBridge(): Omit<XrplDesktopApi, 'isElectron' | 'platform' 
     systemGetTrayUpdaterState: async (): Promise<TrayAndUpdaterSettings> => ({
       minimizeToTray: false,
       nodeWatchdogEnabled: false,
-      currentVersion: '0.2.2-beta',
+      currentVersion: '0.2.3-beta',
       updateState: 'idle',
     }),
     systemUpdateTraySettings: async () => ({
       minimizeToTray: false,
       nodeWatchdogEnabled: false,
-      currentVersion: '0.2.2-beta',
+      currentVersion: '0.2.3-beta',
       updateState: 'idle',
     }),
     systemCheckForUpdates: async () => ({
       minimizeToTray: false,
       nodeWatchdogEnabled: false,
-      currentVersion: '0.2.2-beta',
+      currentVersion: '0.2.3-beta',
       updateState: 'idle',
     }),
 
@@ -493,6 +493,22 @@ export function getXrplBridge(): Omit<XrplDesktopApi, 'isElectron' | 'platform' 
     walletExportBackup: desktopOnlyErr,
     walletImportBackup: desktopOnlyErr,
     walletSetAutoLockMinutes: async (minutes: number) => ({ ok: true, minutes }),
+    walletExportSecurityAudit: async (payload: { defaultFilename: string; markdown: string }) => {
+      try {
+        const blob = new Blob([payload.markdown], { type: 'text/markdown;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = payload.defaultFilename || 'xrpl-security-audit.md';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        return { ok: true, filePath: a.download };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : 'Download failed' };
+      }
+    },
     analyticsExportTaxCsv: desktopOnlyErr,
     systemExportDiagnostics: desktopOnlyErr,
 

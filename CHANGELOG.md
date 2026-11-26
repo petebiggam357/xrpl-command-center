@@ -2,6 +2,22 @@
 
 All notable changes to **XRPL Command Center** are documented in this file.
 
+## [0.2.3-beta] - 2026-11-26
+
+### Added
+- **Track 1 — XRPL Developer RPC Console & Ledger Time Machine (`RPC & Replay` tab + `Ctrl+K` quick-jump):**
+  - Added lazy-loaded `DevRpcDeck` featuring an interactive JSON-RPC / WebSocket Playground with 8 one-click `rippled` presets (`server_info`, `fee`, `account_info`, `account_objects`, `amm_info`, `book_offers`, `gateway_balances`, `ledger_entry`), live JSON parameter validation, `Ctrl+Enter` execution, latency badge, copyable formatted output, and persisted local query history.
+  - Added **Ledger Time Machine** to load any historical validated ledger index (with `-1000`, `-100`, `-10`, `-1`, `+1`, `+10`, `Latest` step controls), inspect close time, total XRP supply, and click any historical transaction to open `InspectorDrawer`.
+- **Track 2 — Live CLOB vs. AMM Spread & Liquidity Radar (`Tokens & DEX`):**
+  - Added live `computeClobVsAmmSpread` comparison card inside `TokenExplorer` displaying CLOB Mid-Price vs. XLS-30 AMM Spot Price side-by-side, spread percentage, LP trading fee (bps), net arbitrage edge, cheaper venue indicator, and a 1-click **Swap / Provide LP** handoff.
+- **Track 3 — Multi-Tranche Escrow Vesting Builder & Account Security Audit Report (`Wallets & DeFi`):**
+  - Added **Multi-Tranche Escrow Vesting Schedule Builder** in `WalletDeck` (`Escrows, Checks & NFTs` sub-tab) generating 2–24 exact drop-balanced `EscrowCreate` tranches (Weekly / Bi-Weekly / Monthly / Quarterly) with reserve & fee estimates and per-tranche `TxConfirmModal` signing.
+  - Added 1-click **Security Audit (.md)** export (`wallet:exportSecurityAudit` IPC + browser download fallback) generating a redacted Markdown report of account flags (`Blackholed`, `DefaultRipple`, `RequireDestTag`, `GlobalFreeze`, `NoFreeze`, `AllowClawback`), Multi-Sig quorum, owned objects, and zero-balance TrustLine reserve optimization hints.
+- **Track 4 — Open-Source Public-Launch Readiness & Cryptographic Release Checksums:**
+  - Added `CONTRIBUTING.md`, `SECURITY.md`, `.github/ISSUE_TEMPLATE/` (`bug_report.md`, `feature_request.md`), and `.github/PULL_REQUEST_TEMPLATE.md`.
+  - Updated `.github/workflows/build.yml` to automatically generate per-platform SHA-256 checksum manifests (`SHA256SUMS-linux.txt`, `SHA256SUMS-win.txt`, `SHA256SUMS-mac.txt`) and attach them to every GitHub Release.
+- **Verification:** Added `tests/v023PowerSuite.test.ts` (7 new unit tests; **70/70** total Vitest tests passing across 13 suites).
+
 ## [0.2.2-beta] - 2026-11-26
 
 ### Added

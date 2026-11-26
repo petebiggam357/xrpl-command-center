@@ -30,6 +30,7 @@ export const CommandPalette: React.FC = () => {
     { tab: 'launcher', label: 'Token Launcher & Wizard', hint: '5-Step IOU + AMM & XLS-33 MPT Token Launcher' },
     { tab: 'wallets', label: 'Wallets & Pro DeFi Studio', hint: 'Vault, Ledger USB, Multi-Sig & PathSwap' },
     { tab: 'primitives', label: 'Institutional Primitives', hint: 'MPT, XLS-47 Oracles, DID & xrp-ledger.toml' },
+    { tab: 'rpc', label: 'RPC Console & Time Machine', hint: 'Raw rippled JSON-RPC Playground & Historical Ledgers' },
     { tab: 'nodeops', label: 'My Node Ops & Docker', hint: '1-Click Docker Node & rippled.cfg Diff Studio' },
     { tab: 'analytics', label: 'SQLite Analytics & System', hint: 'CSV Accounting Export, Tray Watchdog & Updater' },
     { tab: 'education', label: 'XRPL Academy & Guide', hint: 'Deep XRPL Curriculum, Reserve Lab, Glossary & Docs' },

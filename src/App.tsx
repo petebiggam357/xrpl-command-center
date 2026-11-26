@@ -34,6 +34,9 @@ const WalletDeck = lazy(() =>
 const PrimitivesDeck = lazy(() =>
   import('./components/PrimitivesDeck').then((m) => ({ default: m.PrimitivesDeck }))
 );
+const DevRpcDeck = lazy(() =>
+  import('./components/DevRpcDeck').then((m) => ({ default: m.DevRpcDeck }))
+);
 const NodeOpsDeck = lazy(() =>
   import('./components/NodeOpsDeck').then((m) => ({ default: m.NodeOpsDeck }))
 );
@@ -188,6 +191,7 @@ export const App: React.FC = () => {
               {activeTab === 'launcher' && <TokenLauncherDeck />}
               {activeTab === 'wallets' && <WalletDeck />}
               {activeTab === 'primitives' && <PrimitivesDeck />}
+              {activeTab === 'rpc' && <DevRpcDeck />}
               {activeTab === 'nodeops' && <NodeOpsDeck />}
               {activeTab === 'analytics' && <AnalyticsDeck />}
               {activeTab === 'education' && <EducationDeck />}

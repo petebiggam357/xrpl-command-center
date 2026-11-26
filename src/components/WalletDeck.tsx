@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   ArrowLeftRight,
   BookUser,
+  Calendar,
   Check,
   Clock,
   Copy,
@@ -9,6 +10,7 @@ import {
   Download,
   Droplets,
   Eye,
+  FileText,
   KeyRound,
   Lock,
   Plus,
@@ -41,6 +43,10 @@ import {
 } from '../shared/betaUtils';
 import type { PathFindQuote, WalletAlgorithm, WalletCheckEntry, WalletGroupTag } from '../shared/types';
 import { computeGroupTotals, WALLET_GROUP_META } from '../shared/v022Utils';
+import {
+  buildAccountSecurityAuditMarkdown,
+  buildEscrowVestingSchedule,
+} from '../shared/v023Utils';
 import { shortenAddress } from '../shared/xrplCodec';
 import { useCommandStore } from '../store/useCommandStore';
 import { AddressBookPanel } from './AddressBookPanel';
@@ -133,6 +139,17 @@ export const WalletDeck: React.FC = () => {
   const [escrowXrp, setEscrowXrp] = useState('');
   const [escrowMinutes, setEscrowMinutes] = useState('60');
   const [escrowCancelHours, setEscrowCancelHours] = useState('');
+
+  // Track 3: Multi-Tranche Escrow Vesting Builder
+  const [vestDest, setVestDest] = useState('');
+  const [vestTotalXrp, setVestTotalXrp] = useState('1200');
+  const [vestTranches, setVestTranches] = useState('6');
+  const [vestIntervalDays, setVestIntervalDays] = useState('30');
+  const [vestStartDate, setVestStartDate] = useState(() => {
+    const nextMonth = new Date(Date.now() + 30 * 86_400_000);
+    return nextMonth.toISOString().slice(0, 10);
+  });
+  const [vestCancelBufferDays, setVestCancelBufferDays] = useState('90');
 
   const [checkDest, setCheckDest] = useState('');
   const [checkXrp, setCheckXrp] = useState('');
@@ -389,6 +406,41 @@ export const WalletDeck: React.FC = () => {
       ),
     [walletPortfolio]
   );
+
+  const vestingPlan = useMemo(() => {
+    if (!activeAccount) return null;
+    const startMs = Date.parse(`${vestStartDate}T12:00:00Z`);
+    return buildEscrowVestingSchedule({
+      account: activeAccount.address,
+      destination: vestDest.trim() || activeAccount.address,
+      totalXrp: Number(vestTotalXrp),
+      trancheCount: Number(vestTranches),
+      intervalDays: Number(vestIntervalDays),
+      startUnixMs: Number.isFinite(startMs) ? startMs : Date.now() + 30 * 86_400_000,
+      cancelBufferDays: Number(vestCancelBufferDays) > 0 ? Number(vestCancelBufferDays) : undefined,
+    });
+  }, [activeAccount, vestDest, vestTotalXrp, vestTranches, vestIntervalDays, vestStartDate, vestCancelBufferDays]);
+
+  const handleExportSecurityAudit = async () => {
+    if (!activeAccount || !walletPortfolio) {
+      setVaultBannerMsg({ ok: false, text: 'Sync the active wallet first before exporting a security audit.' });
+      return;
+    }
+    const markdown = buildAccountSecurityAuditMarkdown(walletPortfolio, {
+      label: activeAccount.label,
+      networkLabel: `${streamStatus.networkId.toUpperCase()} (${streamStatus.endpoint})`,
+      xrpUsd: marketPrice.xrpUsd,
+    });
+    const defaultFilename = `xrpl-security-audit-${activeAccount.address.slice(0, 10)}-${new Date().toISOString().slice(0, 10)}.md`;
+    const res = await getXrplBridge().walletExportSecurityAudit({ defaultFilename, markdown });
+    if (res.cancelled) return;
+    setVaultBannerMsg({
+      ok: res.ok,
+      text: res.ok
+        ? `Security & Reserve Audit exported → ${res.filePath}`
+        : res.error ?? 'Failed to export security audit.',
+    });
+  };
 
   const filteredRecentTxs = useMemo(() => {
     const list = walletPortfolio?.recentTransactions ?? [];
@@ -1017,6 +1069,17 @@ export const WalletDeck: React.FC = () => {
                     >
                       <Printer className="w-3.5 h-3.5 text-emerald-400" />
                       Paper Sheet
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => void handleExportSecurityAudit()}
+                      disabled={!walletPortfolio}
+                      title="Export a redacted Markdown Account Security & Reserve Audit report"
+                      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-xs font-mono text-slate-200 hover:border-cyan-400/50 disabled:opacity-50"
+                    >
+                      <FileText className="w-3.5 h-3.5 text-cyan-400" />
+                      Security Audit (.md)
                     </button>
 
                     {streamStatus.networkId === 'testnet' || streamStatus.networkId === 'devnet' ? (
@@ -1948,6 +2011,124 @@ export const WalletDeck: React.FC = () => {
                         </div>
                       )}
                     </form>
+                  </div>
+
+                  {/* Track 3: Multi-Tranche Escrow Vesting Schedule Builder */}
+                  <div className="hud-panel rounded-xl p-4 space-y-3 border border-cyan-400/25">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <Calendar className="w-4 h-4 text-cyan-400" />
+                        <h3 className="text-xs font-semibold uppercase tracking-[0.15em] text-cyan-300">
+                          Multi-Tranche Escrow Vesting Schedule Builder
+                        </h3>
+                      </div>
+                      <span className="text-[10px] font-mono text-slate-400">
+                        Generates itemized on-ledger EscrowCreate tranches (pre-flighted via TxConfirmModal)
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-6 gap-2">
+                      <input
+                        type="text"
+                        value={vestDest}
+                        onChange={(e) => setVestDest(e.target.value)}
+                        placeholder={`Beneficiary r-Address (blank = self)`}
+                        className="md:col-span-2 rounded-lg bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs font-mono text-white"
+                      />
+                      <input
+                        type="number"
+                        min="1"
+                        step="any"
+                        value={vestTotalXrp}
+                        onChange={(e) => setVestTotalXrp(e.target.value)}
+                        placeholder="Total XRP"
+                        title="Total XRP to split across tranches"
+                        className="rounded-lg bg-slate-950 border border-slate-700 px-2.5 py-1.5 text-xs font-mono text-white"
+                      />
+                      <select
+                        aria-label="Vesting tranche count"
+                        value={vestTranches}
+                        onChange={(e) => setVestTranches(e.target.value)}
+                        className="rounded-lg bg-slate-950 border border-slate-700 px-2.5 py-1.5 text-xs font-mono text-white"
+                      >
+                        {[2, 3, 4, 6, 8, 12, 24].map((n) => (
+                          <option key={n} value={n}>
+                            {n} Tranches
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        aria-label="Vesting interval"
+                        value={vestIntervalDays}
+                        onChange={(e) => setVestIntervalDays(e.target.value)}
+                        className="rounded-lg bg-slate-950 border border-slate-700 px-2.5 py-1.5 text-xs font-mono text-white"
+                      >
+                        <option value="7">Weekly (7d)</option>
+                        <option value="14">Bi-Weekly (14d)</option>
+                        <option value="30">Monthly (30d)</option>
+                        <option value="90">Quarterly (90d)</option>
+                      </select>
+                      <input
+                        type="date"
+                        value={vestStartDate}
+                        onChange={(e) => setVestStartDate(e.target.value)}
+                        title="First tranche unlock date (UTC)"
+                        className="rounded-lg bg-slate-950 border border-slate-700 px-2.5 py-1.5 text-xs font-mono text-white"
+                      />
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono">
+                      <div className="flex items-center gap-3 text-slate-300">
+                        <span>
+                          Cancel Buffer:{' '}
+                          <input
+                            type="number"
+                            min="0"
+                            value={vestCancelBufferDays}
+                            onChange={(e) => setVestCancelBufferDays(e.target.value)}
+                            className="w-16 rounded bg-slate-950 border border-slate-700 px-1.5 py-0.5 text-[11px] text-cyan-200"
+                          />{' '}
+                          days after unlock
+                        </span>
+                      </div>
+                      {vestingPlan?.ok && (
+                        <div className="text-cyan-300">
+                          Total: <strong>{vestingPlan.totalXrp.toLocaleString()} XRP</strong> • Reserve:{' '}
+                          <strong>+{vestingPlan.additionalReserveXrp} XRP</strong> • Est. Fees:{' '}
+                          <strong>{vestingPlan.estimatedNetworkFeeXrp} XRP</strong>
+                        </div>
+                      )}
+                    </div>
+
+                    {vestingPlan && !vestingPlan.ok ? (
+                      <div className="p-2.5 rounded-lg bg-rose-500/15 border border-rose-400/40 text-xs font-mono text-rose-200">
+                        {vestingPlan.error}
+                      </div>
+                    ) : vestingPlan && vestingPlan.tranches.length > 0 ? (
+                      <div className="max-h-56 overflow-y-auto space-y-1.5 pr-1">
+                        {vestingPlan.tranches.map((tr) => (
+                          <div
+                            key={tr.index}
+                            className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 rounded-lg bg-slate-950/80 border border-slate-800 font-mono text-xs"
+                          >
+                            <div className="flex items-center gap-3">
+                              <span className="px-1.5 py-0.5 rounded bg-cyan-500/15 border border-cyan-400/30 text-[10px] text-cyan-200">
+                                #{tr.index}/{vestingPlan.tranches.length}
+                              </span>
+                              <span className="text-white font-bold tabular-nums">{tr.amountXrp} XRP</span>
+                              <span className="text-slate-400">Unlock: {tr.unlockDateIso} UTC</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => void openTxConfirmModal(activeAccount.id, tr.intent)}
+                              className="px-2.5 py-1 rounded-lg bg-cyan-500/20 border border-cyan-400/50 text-[11px] text-cyan-200 hover:bg-cyan-500/30"
+                            >
+                              Preview &amp; Sign Tranche #{tr.index}
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
                   </div>
 
                   <div className="hud-panel rounded-xl p-4 space-y-4">

@@ -33,7 +33,7 @@ import { resolveRustSidecarBinaryPath, RustVaultSidecarClient } from './rustVaul
 import { WalletVaultService } from './walletVaultService';
 import { XrplStreamManager } from './xrplStream';
 
-const APP_VERSION = '0.2.2-beta';
+const APP_VERSION = '0.2.3-beta';
 const LEDGER_USB_VENDOR_ID = 0x2c97;
 const TREZOR_USB_VENDOR_IDS = new Set([0x1209, 0x534c]);
 
@@ -766,6 +766,32 @@ function registerIpcHandlers(): void {
     const applied = walletVault.setAutoLockMinutes(minutes);
     return { ok: true, minutes: applied };
   });
+
+  ipcMain.handle(
+    'wallet:exportSecurityAudit',
+    async (_evt, payload: { defaultFilename: string; markdown: string }) => {
+      try {
+        const safeName =
+          (payload?.defaultFilename || `xrpl-security-audit-${new Date().toISOString().slice(0, 10)}.md`)
+            .replace(/[^a-zA-Z0-9._-]/g, '_');
+        const picked = await dialog.showSaveDialog({
+          title: 'Export XRPL Account Security & Reserve Audit (.md)',
+          defaultPath: path.join(app.getPath('documents'), safeName),
+          filters: [{ name: 'Markdown Report', extensions: ['md', 'txt'] }],
+        });
+        if (picked.canceled || !picked.filePath) {
+          return { ok: false, cancelled: true };
+        }
+        await fs.writeFile(picked.filePath, String(payload?.markdown ?? ''), 'utf8');
+        return { ok: true, filePath: picked.filePath };
+      } catch (err) {
+        return {
+          ok: false,
+          error: err instanceof Error ? err.message : 'Unable to export security audit report.',
+        };
+      }
+    }
+  );
 
   ipcMain.handle('analytics:exportTaxCsv', async () => {
     try {

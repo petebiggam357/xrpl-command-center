@@ -12,6 +12,7 @@ import {
   ShieldCheck,
   Trash2,
 } from 'lucide-react';
+import { computeClobVsAmmSpread } from '../shared/v023Utils';
 import { formatCompactNumber, shortenAddress } from '../shared/xrplCodec';
 import { useCommandStore } from '../store/useCommandStore';
 import { DexDepthCanvas } from './DexDepthCanvas';
@@ -36,6 +37,11 @@ export const TokenExplorer: React.FC = () => {
   const [sortBy, setSortBy] = useState<'trustlines' | 'volume24hUsd' | 'holders'>('trustlines');
   const [alertDir, setAlertDir] = useState<'above' | 'below'>('above');
   const [alertPriceInput, setAlertPriceInput] = useState('');
+
+  const spreadReport = useMemo(
+    () => (tokenOnLedgerReport ? computeClobVsAmmSpread(tokenOnLedgerReport) : null),
+    [tokenOnLedgerReport]
+  );
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -433,6 +439,74 @@ export const TokenExplorer: React.FC = () => {
                   </div>
                 )}
               </div>
+
+              {/* Live CLOB vs. AMM Spread & Liquidity Radar */}
+              {spreadReport && (
+                <div className="rounded-xl p-3 bg-cyan-500/10 border border-cyan-400/30 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5 text-[11px] font-mono uppercase text-cyan-300">
+                      <ArrowLeftRight className="w-3.5 h-3.5" />
+                      CLOB vs. AMM Spread Radar
+                    </div>
+                    <span
+                      className={`px-2 py-0.5 rounded text-[10px] font-mono font-semibold border ${
+                        spreadReport.cheaperVenue === 'AMM'
+                          ? 'bg-violet-500/20 border-violet-400/40 text-violet-200'
+                          : spreadReport.cheaperVenue === 'CLOB'
+                            ? 'bg-emerald-500/20 border-emerald-400/40 text-emerald-200'
+                            : spreadReport.cheaperVenue === 'PARITY'
+                              ? 'bg-cyan-500/20 border-cyan-400/40 text-cyan-200'
+                              : 'bg-slate-900 border-slate-700 text-slate-400'
+                      }`}
+                    >
+                      {spreadReport.cheaperVenue === 'INSUFFICIENT_DATA'
+                        ? 'SINGLE VENUE'
+                        : spreadReport.cheaperVenue === 'PARITY'
+                          ? 'PARITY'
+                          : `${spreadReport.cheaperVenue} CHEAPER`}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2 font-mono text-xs">
+                    <div className="rounded-lg bg-slate-950/75 border border-slate-800 p-2">
+                      <div className="text-[10px] text-slate-400">CLOB Mid</div>
+                      <div className="text-white font-semibold tabular-nums">
+                        {spreadReport.clobMidPriceXrp !== null
+                          ? `${spreadReport.clobMidPriceXrp.toPrecision(4)} XRP`
+                          : '—'}
+                      </div>
+                    </div>
+                    <div className="rounded-lg bg-slate-950/75 border border-slate-800 p-2">
+                      <div className="text-[10px] text-slate-400">AMM Spot</div>
+                      <div className="text-violet-300 font-semibold tabular-nums">
+                        {spreadReport.ammSpotPriceXrp !== null
+                          ? `${spreadReport.ammSpotPriceXrp.toPrecision(4)} XRP`
+                          : '—'}
+                      </div>
+                    </div>
+                    <div className="rounded-lg bg-slate-950/75 border border-slate-800 p-2">
+                      <div className="text-[10px] text-slate-400">Spread / LP Fee</div>
+                      <div className="text-emerald-300 font-semibold tabular-nums">
+                        {spreadReport.absSpreadPct !== null ? `${spreadReport.absSpreadPct.toFixed(2)}%` : '—'}
+                        {spreadReport.ammTradingFeeBps !== null
+                          ? ` • ${spreadReport.ammTradingFeeBps.toFixed(0)} bps`
+                          : ''}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
+                    <span className="text-[11px] font-mono text-slate-300">{spreadReport.summary}</span>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('wallets')}
+                      className="px-2.5 py-1 rounded-lg bg-cyan-500/20 border border-cyan-400/50 text-[11px] font-mono text-cyan-200 hover:bg-cyan-500/30 shrink-0"
+                    >
+                      Swap / Provide LP →
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* Interactive CLOB Depth Wall & AMM Constant-Product Curve Canvas */}
               <DexDepthCanvas

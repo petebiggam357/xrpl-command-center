@@ -11,6 +11,7 @@ import {
   Rocket,
   Server,
   ShieldCheck,
+  Terminal,
   Trash2,
   Wallet,
 } from 'lucide-react';
@@ -30,6 +31,7 @@ const NAV_ITEMS: Array<{
   { id: 'launcher', label: 'Token Launcher', subtitle: 'IOU / MPT Launch Wizard', icon: Rocket },
   { id: 'wallets', label: 'Wallets & DeFi', subtitle: 'Vault, Ledger, PathSwap', icon: Wallet },
   { id: 'primitives', label: 'Institutional', subtitle: 'MPT, Oracles, DID & TOML', icon: Building2 },
+  { id: 'rpc', label: 'RPC & Replay', subtitle: 'JSON-RPC & Time Machine', icon: Terminal },
   { id: 'nodeops', label: 'My Node Ops', subtitle: 'Docker, Config & Admin', icon: Server },
   { id: 'analytics', label: 'Analytics & Tray', subtitle: 'SQLite, CSV & Updater', icon: Database },
   { id: 'education', label: 'XRPL Academy', subtitle: 'Docs, Labs & Guide', icon: GraduationCap },

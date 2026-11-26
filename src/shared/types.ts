@@ -8,6 +8,7 @@ export type NavTab =
   | 'launcher'
   | 'wallets'
   | 'primitives'
+  | 'rpc'
   | 'nodeops'
   | 'analytics'
   | 'education';
@@ -967,6 +968,10 @@ export interface XrplDesktopApi {
   walletExportBackup: () => Promise<VaultBackupResult>;
   walletImportBackup: () => Promise<VaultBackupResult>;
   walletSetAutoLockMinutes: (minutes: number) => Promise<{ ok: boolean; minutes: number }>;
+  walletExportSecurityAudit: (payload: {
+    defaultFilename: string;
+    markdown: string;
+  }) => Promise<{ ok: boolean; filePath?: string; cancelled?: boolean; error?: string }>;
   analyticsExportTaxCsv: () => Promise<{ ok: boolean; filePath?: string; rowCount?: number; error?: string }>;
   systemExportDiagnostics: () => Promise<{ ok: boolean; filePath?: string; cancelled?: boolean; error?: string }>;
 
