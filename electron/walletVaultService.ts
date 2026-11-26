@@ -566,6 +566,134 @@ export function buildXrplTransactionFromIntent(intent: WalletTxIntent): {
       };
     }
 
+    case 'VaultCreate': {
+      const asset = formatAmmCurrencySpec(intent.asset);
+      const flags = intent.isPrivate ? 0x00010000 : 0; // tfVaultPrivate
+      const tx: Record<string, unknown> = {
+        TransactionType: 'VaultCreate',
+        Account: intent.account,
+        Asset: asset,
+        WithdrawalPolicy: 1, // vaultStrategyFirstComeFirstServe
+        ...(flags > 0 ? { Flags: flags } : {}),
+      };
+      if (intent.assetsMaximum?.trim()) {
+        tx.AssetsMaximum = intent.assetsMaximum.trim();
+      }
+      if (intent.domainId?.trim()) {
+        const dom = intent.domainId.trim().toUpperCase();
+        if (!/^[0-9A-F]{64}$/.test(dom)) {
+          throw new Error('Permissioned Domain ID must be a 64-character hex string');
+        }
+        tx.DomainID = dom;
+      }
+      if (intent.dataText?.trim()) {
+        tx.Data = utf8ToHex(intent.dataText.trim());
+      }
+      return {
+        tx,
+        summaryLines: [
+          { label: 'Action', value: 'Create XLS-65 Single Asset Vault' },
+          { label: 'Vault Asset', value: decodeCurrencyCode(asset.currency) },
+          { label: 'Access Mode', value: intent.isPrivate ? 'Private (Permissioned Domain)' : 'Public Open Vault' },
+          ...(intent.assetsMaximum?.trim()
+            ? [{ label: 'Assets Maximum', value: intent.assetsMaximum.trim() }]
+            : []),
+        ],
+      };
+    }
+
+    case 'VaultDeposit': {
+      const vaultId = intent.vaultId.trim().toUpperCase();
+      if (!/^[0-9A-F]{64}$/.test(vaultId)) {
+        throw new Error('Vault ID must be a 64-character hex string');
+      }
+      const amount = formatAssetForXrpl(intent.amount);
+      return {
+        tx: {
+          TransactionType: 'VaultDeposit',
+          Account: intent.account,
+          VaultID: vaultId,
+          Amount: amount,
+        },
+        summaryLines: [
+          { label: 'Action', value: 'Deposit into XLS-65 Vault' },
+          { label: 'Vault ID', value: `${vaultId.slice(0, 12)}…` },
+          { label: 'Deposit Amount', value: formatXrplAmount(amount) },
+        ],
+      };
+    }
+
+    case 'VaultWithdraw': {
+      const vaultId = intent.vaultId.trim().toUpperCase();
+      if (!/^[0-9A-F]{64}$/.test(vaultId)) {
+        throw new Error('Vault ID must be a 64-character hex string');
+      }
+      const amount = formatAssetForXrpl(intent.amount);
+      return {
+        tx: {
+          TransactionType: 'VaultWithdraw',
+          Account: intent.account,
+          VaultID: vaultId,
+          Amount: amount,
+        },
+        summaryLines: [
+          { label: 'Action', value: 'Withdraw from XLS-65 Vault' },
+          { label: 'Vault ID', value: `${vaultId.slice(0, 12)}…` },
+          { label: 'Withdraw Amount', value: formatXrplAmount(amount) },
+        ],
+      };
+    }
+
+    case 'LoanBrokerSet': {
+      const vaultId = intent.vaultId.trim().toUpperCase();
+      if (!/^[0-9A-F]{64}$/.test(vaultId)) {
+        throw new Error('Linked Vault ID must be a 64-character hex string');
+      }
+      const mgmtUnits = Math.max(0, Math.min(10_000, Math.round(intent.managementFeeRateBps * 10)));
+      const coverMinUnits = Math.max(0, Math.min(100_000, Math.round(intent.coverRateMinimumPct * 1000)));
+      const coverLiqUnits = Math.max(0, Math.min(100_000, Math.round(intent.coverRateLiquidationPct * 1000)));
+      const tx: Record<string, unknown> = {
+        TransactionType: 'LoanBrokerSet',
+        Account: intent.account,
+        VaultID: vaultId,
+        ManagementFeeRate: mgmtUnits,
+        DebtMaximum: intent.debtMaximum.trim() || '0',
+        CoverRateMinimum: coverMinUnits,
+        CoverRateLiquidation: coverLiqUnits,
+        ...(intent.dataText?.trim() ? { Data: utf8ToHex(intent.dataText.trim()) } : {}),
+      };
+      return {
+        tx,
+        summaryLines: [
+          { label: 'Action', value: 'Create / Update XLS-66 Loan Broker' },
+          { label: 'Linked Vault', value: `${vaultId.slice(0, 12)}…` },
+          { label: 'Mgmt Fee / Debt Max', value: `${(intent.managementFeeRateBps / 100).toFixed(2)}% • ${intent.debtMaximum}` },
+          { label: 'First-Loss Cover Min', value: `${intent.coverRateMinimumPct}%` },
+        ],
+      };
+    }
+
+    case 'LoanPay': {
+      const loanId = intent.loanId.trim().toUpperCase();
+      if (!/^[0-9A-F]{64}$/.test(loanId)) {
+        throw new Error('Loan ID must be a 64-character hex string');
+      }
+      const amount = formatAssetForXrpl(intent.amount);
+      return {
+        tx: {
+          TransactionType: 'LoanPay',
+          Account: intent.account,
+          LoanID: loanId,
+          Amount: amount,
+        },
+        summaryLines: [
+          { label: 'Action', value: 'Submit XLS-66 Loan Repayment' },
+          { label: 'Loan ID', value: `${loanId.slice(0, 12)}…` },
+          { label: 'Payment Amount', value: formatXrplAmount(amount) },
+        ],
+      };
+    }
+
     case 'NFTokenMint': {
       const flags =
         (intent.burnable ? 0x00000001 : 0) |

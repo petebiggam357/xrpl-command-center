@@ -33,7 +33,7 @@ import { resolveRustSidecarBinaryPath, RustVaultSidecarClient } from './rustVaul
 import { WalletVaultService } from './walletVaultService';
 import { XrplStreamManager } from './xrplStream';
 
-const APP_VERSION = '0.2.5-beta';
+const APP_VERSION = '0.2.6-beta';
 const LEDGER_USB_VENDOR_ID = 0x2c97;
 const TREZOR_USB_VENDOR_IDS = new Set([0x1209, 0x534c]);
 

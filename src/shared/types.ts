@@ -7,6 +7,7 @@ export type NavTab =
   | 'tokens'
   | 'launcher'
   | 'nftstudio'
+  | 'vaults'
   | 'wallets'
   | 'primitives'
   | 'rpc'
@@ -578,6 +579,43 @@ export type WalletTxIntent =
       kind: 'SetRegularKey';
       account: string;
       regularKey?: string;
+    }
+  | {
+      kind: 'VaultCreate';
+      account: string;
+      asset: { currency: string; issuer?: string };
+      assetsMaximum?: string;
+      domainId?: string;
+      dataText?: string;
+      isPrivate: boolean;
+    }
+  | {
+      kind: 'VaultDeposit';
+      account: string;
+      vaultId: string;
+      amount: AssetSpec;
+    }
+  | {
+      kind: 'VaultWithdraw';
+      account: string;
+      vaultId: string;
+      amount: AssetSpec;
+    }
+  | {
+      kind: 'LoanBrokerSet';
+      account: string;
+      vaultId: string;
+      managementFeeRateBps: number;
+      debtMaximum: string;
+      coverRateMinimumPct: number;
+      coverRateLiquidationPct: number;
+      dataText?: string;
+    }
+  | {
+      kind: 'LoanPay';
+      account: string;
+      loanId: string;
+      amount: AssetSpec;
     }
   | {
       kind: 'NFTokenMint';

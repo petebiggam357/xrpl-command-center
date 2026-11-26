@@ -327,6 +327,37 @@ export const EDUCATION_LESSONS: EducationLesson[] = [
     ],
   },
   {
+    id: 'xls65-vaults-and-xls66-lending',
+    category: 'defi',
+    level: 'Intermediate',
+    readMinutes: 5,
+    title: 'XLS-65 Single Asset Vaults & XLS-66 Native Lending Protocol',
+    summary:
+      'How protocol-native single-asset liquidity vaults pair with fixed-term institutional lending and First-Loss Cover waterfalls directly on XRPL Layer 1.',
+    appTab: 'vaults',
+    appCta: 'Open Vaults & Lending',
+    keyTakeaways: [
+      'XLS-65 Single Asset Vaults pool one asset (XRP, IOU, or MPT) and issue native XLS-33 MPT Vault Shares — open to everyone or permissioned via XLS-80 Domains.',
+      'XLS-66 plugs directly into XLS-65 Vaults for fixed-term, fixed-rate credit originated by Loan Brokers with off-chain underwriting.',
+      'Loan Brokers post First-Loss Cover on-ledger, which absorbs borrower defaults before regular vault depositors lose any principal.',
+    ],
+    sections: [
+      {
+        heading: 'Composable Protocol-Native Credit',
+        body: 'Unlike EVM lending protocols that rely on over-collateralized smart contracts, XLS-65 + XLS-66 run natively inside rippled consensus — enabling compliant RLUSD/XRP credit markets with ~3.5s deterministic settlement.',
+      },
+      {
+        heading: 'Stress-Testing the First-Loss Waterfall',
+        body: 'Use the interactive Yield & First-Loss Waterfall Simulator in the Vaults & Lending tab to model how broker cover protects depositors under different default shocks.',
+      },
+    ],
+    proTip:
+      'Watch live validator support toward the 80% quorum threshold for SingleAssetVault (XLS-65) and LendingProtocol (XLS-66) in the top banner of Vaults & Lending or in Validators → Amendment Radar.',
+    links: [
+      { label: 'XRPL Standards (XLS-65 / XLS-66)', url: 'https://github.com/XRPLF/XRPL-Standards' },
+    ],
+  },
+  {
     id: 'running-your-own-rippled-node',
     category: 'nodeops',
     level: 'Advanced',

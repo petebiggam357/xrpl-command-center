@@ -6,7 +6,7 @@
 
 **Real-Time Cross-Platform XRP Ledger Telemetry, 3D Consensus Globe, Encrypted Multi-Wallet & Pro DeFi Studio, Institutional Primitives (`MPT`/`Oracle`/`DID`), 1-Click Docker Node Manager & SQLite Analytics**
 
-[![Version](https://img.shields.io/badge/version-v0.2.5--beta-22d3ee?style=flat-square)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v0.2.6--beta-22d3ee?style=flat-square)](CHANGELOG.md)
 [![Platforms](https://img.shields.io/badge/platforms-AppImage%20%7C%20exe%20%7C%20dmg-34d399?style=flat-square)](#cross-platform-packaging)
 [![Security](https://img.shields.io/badge/vault-Rust%20Argon2id%20%2B%20Ledger%20%2B%20Trezor%20%2B%20Cold%20QR-a78bfa?style=flat-square)](#security--vault-architecture)
 [![License](https://img.shields.io/badge/license-MIT-64748b?style=flat-square)](LICENSE)
@@ -31,12 +31,13 @@
 | **Tokens, DEX & AMM Explorer** | Global XRPL token index (`s1.xrplmeta.org`) + live-stream discovery + **authoritative on-ledger verification** (`account_info`, `gateway_balances`, `book_offers`, `amm_info`), issuer risk flags (`Blackholed`, `GlobalFreeze`, `NoFreeze`, `Clawback`), **Live CLOB vs. AMM Spread & Liquidity Radar**, interactive **XLS-30 AMM Impermanent Loss & LP Yield Simulator** (price-move IL vs. fee APR & break-even days), **60fps CLOB Depth Wall + AMM `x·y=k` Curve Canvas**, **In-Place DEX/AMM Quick-Trade**, and **XRP/USD Price Target Alerts**. |
 | **Token Launcher & Batch Airdrop** | Guided 5-step **XRPL Token Launcher** supporting **Classic XRPL IOUs** (Issuer + Distributor two-wallet architecture) and **XLS-33 Multi-Purpose Tokens (`MPT`)**, 1-click presets (`Community / Meme`, `Regulated RWA`, `Institutional MPT`), live 3-char / 160-bit 40-hex currency validation, `TransferRate` & `TickSize` encoding, governance flags (`DefaultRipple`, `Clawback`, `RequireAuth`, `NoFreeze`), optional **XLS-30 AMM Liquidity Pool** seeding, live **`xrp-ledger.toml`** generation & linting, and **CSV Batch Airdrop Studio** with downloadable receipt CSV. |
 | **XLS-20 NFT Studio & Launchpad** | End-to-end **1-of-1 & Collection NFT Launchpad** with an **XLS-24d Metadata Builder & Preflight Linter** (enforces XRPL's 256-byte URI limit, IPFS immutability, `tfTransferable`/`tfBurnable`/`tfOnlyXRP` flags & royalties), **Live Marketplace Card Preview**, **Collection Batch Minter** (sequential IPFS CIDs or CSV + Traits) with exact **XLS-20 `NFTokenPage` Reserve & Cost Calculator**, **Trait Rarity & Distribution Analyzer**, **Post-Mint Bulk Sell-Offer & 0-XRP Whitelist Airdrop Queue**, and an interactive **Creator Playbook ("What Sells Best on XRPL")**. |
+| **XLS-65 Vaults & XLS-66 Lending** | Amendment-aware **Single Asset Vault (`XLS-65`) & Native Lending Protocol (`XLS-66`) Studio** with live validator activation status badges, native `VaultCreate` (Public or XLS-80 Permissioned Domain), `VaultDeposit`, `VaultWithdraw`, `LoanBrokerSet`, and `LoanPay` transaction builders, live on-ledger `vault_info` / `ledger_entry` inspectors, and an interactive **Yield & First-Loss Cover Waterfall Simulator**. |
 | **Wallets & Pro DeFi Studio** | Process-isolated **Rust Argon2id + AES-256-GCM + Zeroize Vault**, configurable **Auto-Lock Timer (`5m/15m/30m/60m`)**, 1-click encrypted **`.xrplvault` Backup/Restore**, **Offline Printable Cold Recovery Sheet**, **1-Click Account Security & Reserve Audit (.md)**, **Multi-Wallet Combined Net Worth & Portfolio Groups**, **Dry-Run Tx Simulator & Balance-Delta Preview**, **Open-SDK Hardware & Cold Wallet Hub** (**Ledger WebHID USB**, **Trezor Suite Bridge / WebUSB**, **Keystone 3 Pro**, **Tangem**, **D'CENT / Ellipal**, **Xaman**), **Smart Address Book & Exchange Destination-Tag Guard**, **X-Address decode**, **Multi-Tranche Escrow Vesting Schedule Builder**, **Streaming Payment Channels (`PaymentChannelCreate` / `Fund`)**, **RegularKey Rotation (`SetRegularKey`)**, **Visual NFT Gallery**, **Air-Gapped QR**, **Native Multi-Sign**, **Smart Pathfinding Swap**, `OfferCreate`/`Cancel`, `AMMCreate`/`AMMVote`/`Deposit`/`Withdraw`, Escrows, Checks, and **1-Click Testnet Playground**. |
 | **Institutional Studio** | Issue **Multi-Purpose Tokens (`MPTokenIssuanceCreate`, `MPTokenAuthorize`)**, manage regulated **`Clawback` (`XLS-39`)**, generate & lint **`xrp-ledger.toml`** with 1-click `AccountSet` domain linking, query & publish **XLS-47 Price Oracles (`get_aggregate_price` / `OracleSet`)**, and resolve/anchor **XLS-40 W3C DIDs (`DIDSet`)**. |
 | **RPC Console & Time Machine** | Interactive **XRPL JSON-RPC / WebSocket Playground** with 8 one-click `rippled` presets (`server_info`, `fee`, `account_info`, `account_objects`, `amm_info`, `book_offers`, `gateway_balances`, `ledger_entry`), live JSON validation, latency readout & saved query history, plus a **Ledger Time Machine** to jump to or step across any historical validated ledger (`-1000` to `+10` / `Latest`) and click-to-inspect past transactions. |
 | **My Node Ops & Docker** | **1-Click Cross-Platform Docker `xrpld` Launcher** (Mainnet/Testnet/Devnet, loopback-only admin `127.0.0.1:5005`), **Custom Storage Drive & Folder Picker** (store multi-GB/TB `NuDB`/`RocksDB` ledger history on any internal NVMe or external SSD with live free-space monitoring), **Visual `rippled.cfg` & `validators.txt` Diff Studio** with timestamped `.bak` auto-backups, SSH-tunneled admin telemetry, and local `debug.log` tailer. |
 | **Analytics, Themes & Diagnostics** | Embedded **WebAssembly SQLite (`command-center.sqlite`)** recording ledger throughput & tracked wallet transaction journals, **Portfolio Net Worth Trend & Asset Allocation**, **1-click CoinTracker/Koinly Tax CSV** & raw CSV export, **4 HUD Themes** (`Cyber Cyan`, `Emerald Matrix`, `Solar Amber`, `Midnight High-Contrast`), **Custom Vault Auto-Lock (`5m/15m/30m/60m`)**, **Redacted Diagnostics Export** (auto-strips XRPL seeds), **OS System Tray Mode**, **30s Background Node Watchdog**, and `electron-updater` release checks. |
-| **XRPL Academy (Education)** | Built-in interactive XRP Ledger & Command Center education hub with **10 deep lessons** (Consensus/UNL, Reserves, Destination Tags/X-Addresses, TrustLines, CLOB + XLS-30 AMM, Escrows/Checks/NFTs, Rust Vault & Hardware Custody, Institutional MPT/Oracles/DIDs, Self-Hosted Nodes & Command Center Tour), **mastery progress tracking**, **Interactive Reserve & Fee Simulator**, **20-term searchable XRPL Glossary**, and **12 curated official XRPL docs & explorer links**. |
+| **XRPL Academy (Education)** | Built-in interactive XRP Ledger & Command Center education hub with **11 deep lessons** (including XLS-65 Single Asset Vaults & XLS-66 Native Lending Protocol, Consensus/UNL, Reserves, Destination Tags/X-Addresses, TrustLines, CLOB + XLS-30 AMM, Escrows/Checks/NFTs, Rust Vault & Hardware Custody, Institutional MPT/Oracles/DIDs, Self-Hosted Nodes & Command Center Tour), **mastery progress tracking**, **Interactive Reserve & Fee Simulator**, **20-term searchable XRPL Glossary**, and **12 curated official XRPL docs & explorer links**. |
 
 ---
 
@@ -91,18 +92,18 @@ flowchart LR
 
 ## Quick Start
 
-### Option 1: Launch a Packaged Release (`v0.2.5-beta`)
+### Option 1: Launch a Packaged Release (`v0.2.6-beta`)
 
 Download the package for your operating system from the **Releases** page:
 
 - **Linux (`.AppImage`):**
   ```bash
-  chmod +x XRPL-Command-Center-0.2.5-beta-linux-x86_64.AppImage
-  ./XRPL-Command-Center-0.2.5-beta-linux-x86_64.AppImage
+  chmod +x XRPL-Command-Center-0.2.6-beta-linux-x86_64.AppImage
+  ./XRPL-Command-Center-0.2.6-beta-linux-x86_64.AppImage
   ```
   > **Ubuntu / Debian tip:** If AppArmor user-namespace restrictions or missing FUSE2 prevent direct launch, run with `--appimage-extract-and-run --no-sandbox`. On first AppImage launch, the desktop dock icon is automatically registered in `~/.local/share/icons` and `~/.local/share/applications`.
-- **Windows (`.exe`):** Run `XRPL-Command-Center-0.2.5-beta-win-x64-setup.exe` (installer) or `XRPL-Command-Center-0.2.5-beta-win-x64-portable.exe` (standalone portable binary).
-- **macOS (`.dmg`):** Open `XRPL-Command-Center-0.2.5-beta-mac-arm64.dmg` (Apple Silicon) and drag **XRPL Command Center** to Applications.
+- **Windows (`.exe`):** Run `XRPL-Command-Center-0.2.6-beta-win-x64-setup.exe` (installer) or `XRPL-Command-Center-0.2.6-beta-win-x64-portable.exe` (standalone portable binary).
+- **macOS (`.dmg`):** Open `XRPL-Command-Center-0.2.6-beta-mac-arm64.dmg` (Apple Silicon) and drag **XRPL Command Center** to Applications.
 
 #### Verify Release Checksums (SHA-256)
 
@@ -116,7 +117,7 @@ sha256sum -c SHA256SUMS-linux.txt
 shasum -a 256 -c SHA256SUMS-mac.txt
 
 # Windows (PowerShell)
-Get-FileHash .\XRPL-Command-Center-0.2.5-beta-win-x64-setup.exe -Algorithm SHA256
+Get-FileHash .\XRPL-Command-Center-0.2.6-beta-win-x64-setup.exe -Algorithm SHA256
 ```
 
 ### Option 2: Run From Source (Development)
@@ -134,7 +135,7 @@ npm run dev
 ```bash
 cargo test --manifest-path rust-vault/Cargo.toml  # Rust Argon2id + ed25519/secp256k1 unit tests
 npm run typecheck                                 # Strict TS checks for renderer & Electron
-npm test                                          # 84 Vitest tests across 15 suites
+npm test                                          # 90 Vitest tests across 16 suites
 npm run build                                     # Vite + esbuild + staged Rust sidecar
 ```
 
@@ -158,9 +159,9 @@ Open **My Node Ops** in the left navigation rail:
 ## Cross-Platform Packaging
 
 ```bash
-npm run dist:linux   # -> release/XRPL-Command-Center-0.2.5-beta-linux-x86_64.AppImage
-npm run dist:win     # -> release/XRPL-Command-Center-0.2.5-beta-win-x64-{setup,portable}.exe
-npm run dist:mac     # -> release/XRPL-Command-Center-0.2.5-beta-mac-arm64.dmg
+npm run dist:linux   # -> release/XRPL-Command-Center-0.2.6-beta-linux-x86_64.AppImage
+npm run dist:win     # -> release/XRPL-Command-Center-0.2.6-beta-win-x64-{setup,portable}.exe
+npm run dist:mac     # -> release/XRPL-Command-Center-0.2.6-beta-mac-arm64.dmg
 ```
 
 ---
@@ -178,7 +179,7 @@ npm run dist:mac     # -> release/XRPL-Command-Center-0.2.5-beta-mac-arm64.dmg
 | Top Bar **Pause** | Freeze live animations while background telemetry, SQLite logging & alerts keep running |
 | Top Bar **Sparkles** | Toggle **Reduced Motion** mode for low-power laptops |
 
-- **Cold-Boot & Binary Size Optimization:** All 11 secondary decks (`3D Globe`, `Validators`, `Tokens`, `Token Launcher`, `NFT Studio`, `Wallets`, `Institutional`, `RPC & Replay`, `Node Ops`, `Analytics`, `XRPL Academy`) are code-split via `React.lazy()` so startup only parses the Command Deck (~71% less startup JS), `dist-electron/main.js` is minified with `esbuild`, duplicate bundled `node_modules` are pruned from `app.asar`, and installers trim unused Chromium locales (`~108 MB` fast-mount Linux AppImage).
+- **Cold-Boot & Binary Size Optimization:** All 12 secondary decks (`3D Globe`, `Validators`, `Tokens`, `Token Launcher`, `NFT Studio`, `Vaults & Lending`, `Wallets`, `Institutional`, `RPC & Replay`, `Node Ops`, `Analytics`, `XRPL Academy`) are code-split via `React.lazy()` so startup only parses the Command Deck (~71% less startup JS), `dist-electron/main.js` is minified with `esbuild`, duplicate bundled `node_modules` are pruned from `app.asar`, and installers trim unused Chromium locales (`~108 MB` fast-mount Linux AppImage).
 
 ---
 

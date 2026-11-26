@@ -2,6 +2,17 @@
 
 All notable changes to **XRPL Command Center** are documented in this file.
 
+## [0.2.6-beta] - 2026-11-26
+
+### Added
+- **XLS-65 Single Asset Vaults & XLS-66 Native Lending Protocol Studio (`Vaults & Lending` tab + `Ctrl+K` quick-jump):**
+  - Added lazy-loaded `VaultLendingDeck` and pure engine `src/shared/vaultLendingUtils.ts` with a live **Amendment Readiness Banner** tracking real-time validator voting support for `SingleAssetVault` (`XLS-65`) and `LendingProtocol` (`XLS-66`) plus 1-click Devnet testing.
+  - Extended `WalletTxIntent` and `WalletVaultService` with native **`VaultCreate`** (Public or XLS-80 Permissioned Domain), **`VaultDeposit`**, **`VaultWithdraw`**, **`LoanBrokerSet`** (management fee, debt cap, first-loss cover min/liquidation %), and **`LoanPay`** transaction builders flowing through `TxConfirmModal`.
+  - Added live on-ledger **`vault_info`** and **`ledger_entry`** inspectors for active Vault IDs, Loan Brokers, and Loans.
+  - Added an interactive **Yield & First-Loss Cover Waterfall Simulator** (`simulateVaultYieldAndWaterfall`) modeling depositor APY vs. simulated borrower default shocks to show how Loan Broker First-Loss Cover shields regular depositors.
+- **XRPL Academy Lesson #11:** Added a dedicated lesson on **XLS-65 Single Asset Vaults & XLS-66 Native Lending Protocol** with a direct **Open Vaults & Lending** CTA.
+- **Verification:** Added `tests/vaultLending.test.ts` (6 new unit tests; **90/90** total Vitest tests passing across 16 suites).
+
 ## [0.2.5-beta] - 2026-11-26
 
 ### Added
