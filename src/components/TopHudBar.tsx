@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Activity,
+  Download,
   Gauge,
   HelpCircle,
   Lock,
@@ -18,8 +19,9 @@ import {
   Wifi,
   WifiOff,
 } from 'lucide-react';
+import { getXrplBridge } from '../services/xrplBridge';
 import { NETWORK_PRESETS } from '../shared/networks';
-import type { NetworkId } from '../shared/types';
+import type { NetworkId, TrayAndUpdaterSettings } from '../shared/types';
 import { useCommandStore } from '../store/useCommandStore';
 
 export const TopHudBar: React.FC = () => {
@@ -49,6 +51,14 @@ export const TopHudBar: React.FC = () => {
   const [customUrlOpen, setCustomUrlOpen] = useState(false);
   const [customLabel, setCustomLabel] = useState('');
   const [customWsUrl, setCustomWsUrl] = useState('ws://127.0.0.1:6006/');
+  const [updaterState, setUpdaterState] = useState<TrayAndUpdaterSettings | null>(null);
+
+  useEffect(() => {
+    const bridge = getXrplBridge();
+    void bridge.systemGetTrayUpdaterState().then(setUpdaterState).catch(() => undefined);
+    const unsub = bridge.onUpdaterState(setUpdaterState);
+    return () => unsub();
+  }, []);
 
   const handleNetworkChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const net = e.target.value as NetworkId;
@@ -96,9 +106,28 @@ export const TopHudBar: React.FC = () => {
               <span className="text-xs font-bold tracking-[0.16em] uppercase text-white">
                 XRPL Command Center
               </span>
-              <span className="px-1.5 py-0.5 rounded bg-cyan-500/15 border border-cyan-400/30 font-mono text-[10px] text-cyan-300">
-                v0.2.10-beta
-              </span>
+              <button
+                type="button"
+                onClick={() => setActiveTab('analytics')}
+                title="Open Seamless App Updater & Diagnostics"
+                className="px-1.5 py-0.5 rounded bg-cyan-500/15 border border-cyan-400/30 hover:border-cyan-300 font-mono text-[10px] text-cyan-300 transition-colors"
+              >
+                v0.2.11-beta
+              </button>
+              {(updaterState?.updateState === 'available' ||
+                updaterState?.updateState === 'downloaded') && (
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('analytics')}
+                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/20 border border-emerald-400/60 hover:bg-emerald-500/30 font-mono text-[10px] font-semibold text-emerald-200 animate-pulse"
+                  title="Seamless update available — click to download & install without losing settings"
+                >
+                  <Download className="w-2.5 h-2.5" />
+                  {updaterState.updateState === 'downloaded'
+                    ? `Restart v${updaterState.availableVersion}`
+                    : `Update v${updaterState.availableVersion}`}
+                </button>
+              )}
             </div>
             <div className="text-[10px] font-mono text-slate-400 truncate max-w-[230px]">
               {streamStatus.endpoint}

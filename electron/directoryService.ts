@@ -139,7 +139,7 @@ async function fetchJsonWithTimeout<T>(url: string, timeoutMs = 10_000): Promise
       signal: controller.signal,
       headers: {
         Accept: 'application/json',
-        'User-Agent': 'XRPL-Command-Center/0.2.10-beta',
+        'User-Agent': 'XRPL-Command-Center/0.2.11-beta',
       },
     });
     if (!res.ok) {

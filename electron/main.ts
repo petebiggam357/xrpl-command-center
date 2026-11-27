@@ -11,9 +11,12 @@ import {
   Tray,
 } from 'electron';
 import { autoUpdater } from 'electron-updater';
+import { execFile, spawn } from 'node:child_process';
 import crypto from 'node:crypto';
+import { createWriteStream } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import { classicAddressToXAddress, xAddressToClassicAddress } from 'xrpl';
 import type {
   AssetSpec,
@@ -26,6 +29,13 @@ import type {
   WalletAlgorithm,
   WalletTxIntent,
 } from '../src/shared/types';
+import {
+  compareSemver,
+  parseSha256Manifest,
+  pickPlatformAsset,
+  verifySha256Digest,
+  type GithubReleaseAssetLike,
+} from '../src/shared/updaterUtils';
 import { buildTaxReadyCsv, redactDiagnosticText } from '../src/shared/v020Utils';
 import { AnalyticsSqliteService } from './analyticsService';
 import { DirectoryService } from './directoryService';
@@ -35,9 +45,23 @@ import { resolveRustSidecarBinaryPath, RustVaultSidecarClient } from './rustVaul
 import { WalletVaultService } from './walletVaultService';
 import { XrplStreamManager } from './xrplStream';
 
-const APP_VERSION = '0.2.10-beta';
+const APP_VERSION = '0.2.11-beta';
+const GITHUB_OWNER = 'petebiggam357';
+const GITHUB_REPO = 'xrpl-command-center';
 const LEDGER_USB_VENDOR_ID = 0x2c97;
 const TREZOR_USB_VENDOR_IDS = new Set([0x1209, 0x534c]);
+const execFileAsync = promisify(execFile);
+
+interface PendingDirectUpdate {
+  version: string;
+  releaseUrl: string;
+  releaseNotes: string;
+  binary: GithubReleaseAssetLike;
+  checksumFile: GithubReleaseAssetLike | null;
+}
+
+let pendingDirectUpdate: PendingDirectUpdate | null = null;
+let stagedUpdateFile: string | null = null;
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -234,30 +258,264 @@ function syncNodeWatchdogTimer(): void {
   }, 30_000);
 }
 
+function getUpdaterAuthPath(): string {
+  return path.join(app.getPath('userData'), 'updater-auth.json');
+}
+
+async function readSavedUpdaterToken(): Promise<string | null> {
+  try {
+    const raw = await fs.readFile(getUpdaterAuthPath(), 'utf8');
+    const parsed = JSON.parse(raw) as { encrypted?: string; plain?: string };
+    if (parsed.encrypted && safeStorage.isEncryptionAvailable()) {
+      const dec = safeStorage.decryptString(Buffer.from(parsed.encrypted, 'base64')).trim();
+      return dec || null;
+    }
+    if (typeof parsed.plain === 'string' && parsed.plain.trim()) {
+      return parsed.plain.trim();
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function saveUpdaterToken(token: string | null): Promise<boolean> {
+  const authPath = getUpdaterAuthPath();
+  if (!token || !token.trim()) {
+    await fs.rm(authPath, { force: true });
+    return false;
+  }
+  const clean = token.trim();
+  const payload = safeStorage.isEncryptionAvailable()
+    ? { encrypted: safeStorage.encryptString(clean).toString('base64') }
+    : { plain: clean };
+  await fs.writeFile(authPath, JSON.stringify(payload), { encoding: 'utf8', mode: 0o600 });
+  return true;
+}
+
+async function resolveUpdaterToken(): Promise<{ token: string | null; hasSavedToken: boolean }> {
+  const saved = await readSavedUpdaterToken();
+  if (saved) return { token: saved, hasSavedToken: true };
+
+  const envToken = (process.env.GH_TOKEN || process.env.GITHUB_TOKEN || '').trim();
+  if (envToken) return { token: envToken, hasSavedToken: false };
+
+  try {
+    const { stdout } = await execFileAsync('gh', ['auth', 'token'], { timeout: 2000 });
+    const ghToken = stdout.trim();
+    if (ghToken) return { token: ghToken, hasSavedToken: false };
+  } catch {
+    // gh CLI not installed or not authenticated — totally fine
+  }
+  return { token: null, hasSavedToken: false };
+}
+
+function getUpdaterSnapshot(): TrayAndUpdaterSettings {
+  const runningAppImage = process.env.APPIMAGE || null;
+  return {
+    ...trayUpdaterState,
+    userDataDir: app.getPath('userData'),
+    runningAppImagePath: runningAppImage,
+    canInstallInPlace:
+      Boolean(runningAppImage) || trayUpdaterState.updateChannel === 'electron-updater',
+  };
+}
+
+function emitUpdaterState(): void {
+  sendToRenderer('system:updaterState', getUpdaterSnapshot());
+}
+
 function configureAutoUpdater(): void {
   autoUpdater.logger = null;
+  autoUpdater.allowPrerelease = true;
   autoUpdater.autoDownload = false;
-  autoUpdater.autoInstallOnAppQuit = false;
+  autoUpdater.autoInstallOnAppQuit = true;
 
   autoUpdater.on('checking-for-update', () => {
     trayUpdaterState.updateState = 'checking';
     trayUpdaterState.updateMessage = 'Checking release feed...';
+    emitUpdaterState();
   });
   autoUpdater.on('update-available', (info) => {
     trayUpdaterState.updateState = 'available';
+    trayUpdaterState.updateChannel = 'electron-updater';
     trayUpdaterState.availableVersion = info.version;
-    trayUpdaterState.updateMessage = `Update v${info.version} is available on your release channel.`;
+    trayUpdaterState.releaseNotes =
+      typeof info.releaseNotes === 'string' ? info.releaseNotes.slice(0, 600) : undefined;
+    trayUpdaterState.updateMessage = `Update v${info.version} is available. Download & install seamlessly without losing settings.`;
+    emitUpdaterState();
   });
   autoUpdater.on('update-not-available', () => {
     trayUpdaterState.updateState = 'not-available';
     trayUpdaterState.updateMessage = `You are running the latest version (v${APP_VERSION}).`;
+    emitUpdaterState();
+  });
+  autoUpdater.on('download-progress', (prog) => {
+    trayUpdaterState.updateState = 'downloading';
+    trayUpdaterState.downloadPercent = Math.round(prog.percent);
+    trayUpdaterState.downloadedBytes = prog.transferred;
+    trayUpdaterState.totalBytes = prog.total;
+    trayUpdaterState.bytesPerSecond = prog.bytesPerSecond;
+    trayUpdaterState.updateMessage = `Downloading update… ${Math.round(prog.percent)}%`;
+    emitUpdaterState();
+  });
+  autoUpdater.on('update-downloaded', (info) => {
+    trayUpdaterState.updateState = 'downloaded';
+    trayUpdaterState.updateChannel = 'electron-updater';
+    trayUpdaterState.downloadPercent = 100;
+    trayUpdaterState.sha256Verified = true;
+    trayUpdaterState.availableVersion = info.version;
+    trayUpdaterState.updateMessage = `Update v${info.version} downloaded & verified! Click Restart & Install — all settings & wallets stay intact.`;
+    emitUpdaterState();
   });
   autoUpdater.on('error', (err) => {
-    trayUpdaterState.updateState = 'error';
-    trayUpdaterState.updateMessage = app.isPackaged
-      ? `Update check unavailable (private repository or offline: ${err.message.slice(0, 90)})`
-      : 'Update check skipped in unpackaged dev mode.';
+    // Only surface electron-updater error if we aren't actively using github-direct
+    if (trayUpdaterState.updateChannel !== 'github-direct') {
+      trayUpdaterState.updateState = 'error';
+      trayUpdaterState.updateMessage = app.isPackaged
+        ? `Release feed check note: ${err.message.slice(0, 100)}`
+        : 'Update check skipped in unpackaged dev mode.';
+      emitUpdaterState();
+    }
   });
+}
+
+async function checkGithubReleasesDirect(): Promise<TrayAndUpdaterSettings> {
+  const { token, hasSavedToken } = await resolveUpdaterToken();
+  trayUpdaterState.hasSavedToken = hasSavedToken;
+  trayUpdaterState.updateState = 'checking';
+  trayUpdaterState.updateMessage = 'Checking GitHub Releases…';
+  emitUpdaterState();
+
+  const headers: Record<string, string> = {
+    Accept: 'application/vnd.github+json',
+    'User-Agent': `XRPL-Command-Center/${APP_VERSION}`,
+  };
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  const res = await fetch(
+    `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases?per_page=10`,
+    { headers }
+  );
+
+  if (res.status === 404 || res.status === 401 || res.status === 403) {
+    trayUpdaterState.updateState = 'error';
+    trayUpdaterState.updateMessage =
+      'Repository is private — sign in with `gh auth login` or enter a GitHub read-only token below to enable 1-click updates.';
+    emitUpdaterState();
+    return getUpdaterSnapshot();
+  }
+  if (!res.ok) {
+    throw new Error(`GitHub Releases HTTP ${res.status}`);
+  }
+
+  const releases = (await res.json()) as Array<{
+    tag_name?: string;
+    draft?: boolean;
+    html_url?: string;
+    body?: string;
+    assets?: GithubReleaseAssetLike[];
+  }>;
+
+  const valid = releases
+    .filter((r) => !r.draft && typeof r.tag_name === 'string' && r.tag_name.length > 0)
+    .sort((a, b) => compareSemver(b.tag_name!, a.tag_name!));
+
+  if (valid.length === 0) {
+    trayUpdaterState.updateState = 'not-available';
+    trayUpdaterState.updateMessage = `No published releases found yet (installed v${APP_VERSION}).`;
+    emitUpdaterState();
+    return getUpdaterSnapshot();
+  }
+
+  const latest = valid[0];
+  const latestVersion = latest.tag_name!.replace(/^v/i, '');
+
+  if (compareSemver(latestVersion, APP_VERSION) <= 0) {
+    pendingDirectUpdate = null;
+    trayUpdaterState.updateState = 'not-available';
+    trayUpdaterState.availableVersion = undefined;
+    trayUpdaterState.updateMessage = `You are running the latest version (v${APP_VERSION}).`;
+    emitUpdaterState();
+    return getUpdaterSnapshot();
+  }
+
+  const picked = pickPlatformAsset(latest.assets ?? [], process.platform);
+  if (!picked.binary) {
+    trayUpdaterState.updateState = 'available';
+    trayUpdaterState.updateChannel = 'github-direct';
+    trayUpdaterState.availableVersion = latestVersion;
+    trayUpdaterState.releaseUrl = latest.html_url;
+    trayUpdaterState.releaseNotes = (latest.body ?? '').slice(0, 600);
+    trayUpdaterState.updateMessage = `v${latestVersion} is published, but no ${process.platform} binary is attached yet.`;
+    emitUpdaterState();
+    return getUpdaterSnapshot();
+  }
+
+  pendingDirectUpdate = {
+    version: latestVersion,
+    releaseUrl: latest.html_url ?? '',
+    releaseNotes: (latest.body ?? '').slice(0, 600),
+    binary: picked.binary,
+    checksumFile: picked.checksumFile,
+  };
+
+  trayUpdaterState.updateState = 'available';
+  trayUpdaterState.updateChannel = 'github-direct';
+  trayUpdaterState.availableVersion = latestVersion;
+  trayUpdaterState.releaseUrl = latest.html_url;
+  trayUpdaterState.releaseNotes = pendingDirectUpdate.releaseNotes;
+  trayUpdaterState.totalBytes = picked.binary.size;
+  trayUpdaterState.downloadPercent = 0;
+  trayUpdaterState.sha256Verified = false;
+  trayUpdaterState.updateMessage = `Update v${latestVersion} is ready to download (${(picked.binary.size / (1024 * 1024)).toFixed(1)} MB). All settings & wallets are preserved.`;
+  emitUpdaterState();
+  return getUpdaterSnapshot();
+}
+
+async function swapAndRelaunchLinuxAppImage(newAppImagePath: string): Promise<void> {
+  const currentAppImage = process.env.APPIMAGE;
+  if (!currentAppImage) {
+    throw new Error('In-place swap requires running from the packaged .AppImage binary.');
+  }
+
+  await fs.chmod(newAppImagePath, 0o755);
+  const backupPath = `${currentAppImage}.prev.bak`;
+  await fs.rm(backupPath, { force: true }).catch(() => undefined);
+
+  // Rename running AppImage to rollback backup (safe on Linux while mapped in memory)
+  await fs.rename(currentAppImage, backupPath);
+
+  try {
+    await fs.rename(newAppImagePath, currentAppImage);
+  } catch {
+    // Cross-device fallback (e.g., Downloads on different mount than AppImage)
+    await fs.copyFile(newAppImagePath, currentAppImage);
+    await fs.rm(newAppImagePath, { force: true }).catch(() => undefined);
+  }
+
+  await fs.chmod(currentAppImage, 0o755);
+
+  // Strip parent AppImage runtime variables so the new AppImage mounts its own SquashFS fresh
+  const cleanEnv: NodeJS.ProcessEnv = { ...process.env };
+  delete cleanEnv.APPIMAGE;
+  delete cleanEnv.APPDIR;
+  delete cleanEnv.ARGV0;
+  delete cleanEnv.OWD;
+
+  const child = spawn(currentAppImage, [], {
+    detached: true,
+    stdio: 'ignore',
+    env: cleanEnv,
+  });
+  child.unref();
+
+  isQuitting = true;
+  setTimeout(() => {
+    app.quit();
+  }, 250);
 }
 
 function createWindow(): void {
@@ -593,7 +851,12 @@ function registerIpcHandlers(): void {
     }
   });
 
-  ipcMain.handle('system:getTrayUpdaterState', () => ({ ...trayUpdaterState }));
+  ipcMain.handle('system:getTrayUpdaterState', async () => {
+    const saved = await readSavedUpdaterToken();
+    trayUpdaterState.hasSavedToken = Boolean(saved);
+    return getUpdaterSnapshot();
+  });
+
   ipcMain.handle(
     'system:updateTraySettings',
     (_evt, patch: { minimizeToTray?: boolean; nodeWatchdogEnabled?: boolean }) => {
@@ -604,25 +867,275 @@ function registerIpcHandlers(): void {
         trayUpdaterState.nodeWatchdogEnabled = patch.nodeWatchdogEnabled;
         syncNodeWatchdogTimer();
       }
-      return { ...trayUpdaterState };
+      emitUpdaterState();
+      return getUpdaterSnapshot();
     }
   );
-  ipcMain.handle('system:checkForUpdates', async () => {
-    if (!app.isPackaged) {
-      trayUpdaterState.updateState = 'not-available';
-      trayUpdaterState.updateMessage = `Dev build active (v${APP_VERSION}). Packaged releases check GitHub Releases automatically.`;
-      return { ...trayUpdaterState };
-    }
+
+  ipcMain.handle('system:setUpdaterToken', async (_evt, token: string | null) => {
     try {
-      await autoUpdater.checkForUpdates();
+      const saved = await saveUpdaterToken(token);
+      trayUpdaterState.hasSavedToken = saved;
+      emitUpdaterState();
+      return { ok: true, hasSavedToken: saved };
+    } catch (err) {
+      return {
+        ok: false,
+        hasSavedToken: Boolean(trayUpdaterState.hasSavedToken),
+        error: err instanceof Error ? err.message : 'Unable to save updater token.',
+      };
+    }
+  });
+
+  ipcMain.handle('system:checkForUpdates', async () => {
+    try {
+      const { token, hasSavedToken } = await resolveUpdaterToken();
+      trayUpdaterState.hasSavedToken = hasSavedToken;
+
+      // If a private-repo token / gh auth token is available (or in dev), query GitHub Releases directly
+      if (token || !app.isPackaged) {
+        return await checkGithubReleasesDirect();
+      }
+
+      // Packaged public repo: try native electron-updater first, fallback to GitHub Releases API
+      try {
+        trayUpdaterState.updateChannel = 'electron-updater';
+        await autoUpdater.checkForUpdates();
+        if (trayUpdaterState.updateState === 'available' || trayUpdaterState.updateState === 'not-available') {
+          return getUpdaterSnapshot();
+        }
+      } catch {
+        // Fallback to GitHub Releases direct API
+      }
+
+      return await checkGithubReleasesDirect();
     } catch (err) {
       trayUpdaterState.updateState = 'error';
       trayUpdaterState.updateMessage =
         err instanceof Error
-          ? `Release feed private or offline (${err.message.slice(0, 80)})`
+          ? `Update check failed (${err.message.slice(0, 90)})`
           : 'Update check unavailable';
+      emitUpdaterState();
+      return getUpdaterSnapshot();
     }
-    return { ...trayUpdaterState };
+  });
+
+  ipcMain.handle('system:downloadUpdate', async () => {
+    try {
+      if (trayUpdaterState.updateChannel === 'electron-updater') {
+        trayUpdaterState.updateState = 'downloading';
+        trayUpdaterState.downloadPercent = 0;
+        trayUpdaterState.updateMessage = 'Starting update download…';
+        emitUpdaterState();
+        await autoUpdater.downloadUpdate();
+        return getUpdaterSnapshot();
+      }
+
+      if (!pendingDirectUpdate) {
+        trayUpdaterState.updateState = 'error';
+        trayUpdaterState.updateMessage = 'No update selected. Click Check for Updates first.';
+        emitUpdaterState();
+        return getUpdaterSnapshot();
+      }
+
+      const { token } = await resolveUpdaterToken();
+      const target = pendingDirectUpdate;
+      const downloadUrl = token ? target.binary.url : target.binary.browser_download_url;
+      const headers: Record<string, string> = {
+        Accept: 'application/octet-stream',
+        'User-Agent': `XRPL-Command-Center/${APP_VERSION}`,
+      };
+      if (token) headers.Authorization = `Bearer ${token}`;
+
+      trayUpdaterState.updateState = 'downloading';
+      trayUpdaterState.downloadPercent = 0;
+      trayUpdaterState.downloadedBytes = 0;
+      trayUpdaterState.totalBytes = target.binary.size;
+      trayUpdaterState.bytesPerSecond = 0;
+      trayUpdaterState.sha256Verified = false;
+      trayUpdaterState.updateMessage = `Downloading v${target.version} (${target.binary.name})…`;
+      emitUpdaterState();
+
+      const res = await fetch(downloadUrl, { headers, redirect: 'follow' });
+      if (!res.ok || !res.body) {
+        throw new Error(`Download HTTP ${res.status}`);
+      }
+
+      const runningAppImage = process.env.APPIMAGE;
+      const destPath =
+        process.platform === 'linux' && runningAppImage
+          ? `${runningAppImage}.update.tmp`
+          : path.join(app.getPath('downloads'), target.binary.name);
+
+      await fs.rm(destPath, { force: true }).catch(() => undefined);
+
+      const contentLen = Number(res.headers.get('content-length') || target.binary.size || 0);
+      const hasher = crypto.createHash('sha256');
+      const out = createWriteStream(destPath, { mode: 0o755 });
+      const reader = res.body.getReader();
+
+      let downloaded = 0;
+      const startedAt = Date.now();
+      let lastEmitAt = 0;
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (!value) continue;
+          const chunk = Buffer.from(value);
+          hasher.update(chunk);
+          if (!out.write(chunk)) {
+            await new Promise<void>((resolve) => out.once('drain', resolve));
+          }
+          downloaded += chunk.length;
+
+          const now = Date.now();
+          if (now - lastEmitAt >= 200) {
+            lastEmitAt = now;
+            const elapsedSec = Math.max(0.2, (now - startedAt) / 1000);
+            const pct = contentLen > 0 ? Math.min(99, Math.round((downloaded / contentLen) * 100)) : 0;
+            trayUpdaterState.downloadPercent = pct;
+            trayUpdaterState.downloadedBytes = downloaded;
+            trayUpdaterState.totalBytes = contentLen || downloaded;
+            trayUpdaterState.bytesPerSecond = Math.round(downloaded / elapsedSec);
+            trayUpdaterState.updateMessage = `Downloading v${target.version}… ${pct}% (${(downloaded / (1024 * 1024)).toFixed(1)} MB)`;
+            emitUpdaterState();
+          }
+        }
+      } finally {
+        await new Promise<void>((resolve, reject) => {
+          out.end();
+          out.on('finish', resolve);
+          out.on('error', reject);
+        });
+      }
+
+      const actualSha256 = hasher.digest('hex');
+
+      // Verify SHA-256 manifest if attached to the release
+      let expectedSha256: string | null = null;
+      if (target.checksumFile) {
+        try {
+          const sumUrl = token
+            ? target.checksumFile.url
+            : target.checksumFile.browser_download_url;
+          const sumRes = await fetch(sumUrl, { headers, redirect: 'follow' });
+          if (sumRes.ok) {
+            const manifestText = await sumRes.text();
+            expectedSha256 = parseSha256Manifest(manifestText, target.binary.name);
+          }
+        } catch {
+          // Proceed with HTTPS integrity note if checksum fetch failed
+        }
+      }
+
+      const verify = verifySha256Digest(actualSha256, expectedSha256);
+      if (!verify.ok) {
+        await fs.rm(destPath, { force: true }).catch(() => undefined);
+        throw new Error(verify.reason);
+      }
+
+      if (process.platform === 'linux') {
+        await fs.chmod(destPath, 0o755);
+      }
+
+      stagedUpdateFile = destPath;
+      trayUpdaterState.updateState = 'downloaded';
+      trayUpdaterState.downloadPercent = 100;
+      trayUpdaterState.downloadedBytes = downloaded;
+      trayUpdaterState.totalBytes = downloaded;
+      trayUpdaterState.sha256Verified = verify.verified;
+      trayUpdaterState.updateMessage =
+        process.platform === 'linux' && runningAppImage
+          ? `v${target.version} ready (${verify.reason}). Click Restart & Install — your wallets, settings & node stay intact.`
+          : `v${target.version} saved to ${path.basename(destPath)} (${verify.reason}). Click Install Update to launch.`;
+      emitUpdaterState();
+      return getUpdaterSnapshot();
+    } catch (err) {
+      trayUpdaterState.updateState = 'error';
+      trayUpdaterState.updateMessage =
+        err instanceof Error ? `Update download failed: ${err.message}` : 'Update download failed.';
+      emitUpdaterState();
+      return getUpdaterSnapshot();
+    }
+  });
+
+  ipcMain.handle('system:installUpdate', async () => {
+    try {
+      if (trayUpdaterState.updateChannel === 'electron-updater') {
+        isQuitting = true;
+        autoUpdater.quitAndInstall(false, true);
+        return { ok: true, message: 'Restarting to apply verified update…' };
+      }
+
+      if (!stagedUpdateFile) {
+        return { ok: false, error: 'No downloaded update file staged yet.' };
+      }
+
+      if (process.platform === 'linux' && process.env.APPIMAGE) {
+        await swapAndRelaunchLinuxAppImage(stagedUpdateFile);
+        return {
+          ok: true,
+          message: 'Swapped AppImage in-place (with .prev.bak rollback) and relaunching…',
+        };
+      }
+
+      // Windows (.exe), macOS (.dmg), or non-AppImage Linux: open downloaded installer/AppImage
+      const openErr = await shell.openPath(stagedUpdateFile);
+      if (openErr) {
+        shell.showItemInFolder(stagedUpdateFile);
+        return {
+          ok: true,
+          message: `Opened folder containing ${path.basename(stagedUpdateFile)}. Close this app and run it — all settings stay preserved.`,
+        };
+      }
+      return {
+        ok: true,
+        message: `Launched ${path.basename(stagedUpdateFile)}. All wallets, settings & node data stay preserved in userData.`,
+      };
+    } catch (err) {
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : 'Unable to install update.',
+      };
+    }
+  });
+
+  ipcMain.handle('system:installLocalAppImage', async () => {
+    try {
+      if (process.platform !== 'linux' || !process.env.APPIMAGE) {
+        return {
+          ok: false,
+          error:
+            'In-place local AppImage upgrade is available when running the packaged Linux .AppImage binary.',
+        };
+      }
+      const picked = await dialog.showOpenDialog(mainWindow!, {
+        title: 'Select Newer XRPL Command Center .AppImage to Install In-Place',
+        properties: ['openFile'],
+        filters: [{ name: 'Linux AppImage', extensions: ['AppImage'] }],
+      });
+      if (picked.canceled || picked.filePaths.length === 0) {
+        return { ok: false, cancelled: true };
+      }
+      const selectedFile = picked.filePaths[0];
+      if (path.resolve(selectedFile) === path.resolve(process.env.APPIMAGE)) {
+        return { ok: false, error: 'Selected file is the exact AppImage currently running.' };
+      }
+      const stagedCopy = `${process.env.APPIMAGE}.update.tmp`;
+      await fs.copyFile(selectedFile, stagedCopy);
+      await swapAndRelaunchLinuxAppImage(stagedCopy);
+      return {
+        ok: true,
+        message: 'Upgraded AppImage in-place and relaunching — all settings & wallets preserved.',
+      };
+    } catch (err) {
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : 'Local AppImage upgrade failed.',
+      };
+    }
   });
 
   ipcMain.handle('desktop:notify', (_evt, payload: DesktopNotificationPayload) => {

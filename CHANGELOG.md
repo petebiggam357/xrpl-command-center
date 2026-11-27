@@ -2,6 +2,16 @@
 
 All notable changes to **XRPL Command Center** are documented in this file.
 
+## [0.2.11-beta] - 2026-11-27
+
+### Added
+- **Seamless In-Place App Updater (Zero Settings / Wallet Loss):**
+  - Configured GitHub Releases `publish` metadata in `electron-builder.yml` so packaged builds embed `app-update.yml` and support native `electron-updater` (`download-progress`, `downloadUpdate`, `quitAndInstall`).
+  - Added full **Check → Download (Live Progress + SHA-256 Verification) → Restart & Install** pipeline in `electron/main.ts` (`system:checkForUpdates`, `system:downloadUpdate`, `system:installUpdate`, `system:installLocalAppImage`, `system:setUpdaterToken`, live `system:updaterState` push events) with automatic fallback to GitHub Releases API (supporting both public repos and private repos via `gh auth token` or an encrypted local token).
+  - Implemented **atomic Linux `.AppImage` in-place self-upgrade**: verifies `SHA256SUMS-linux.txt`, preserves a `.prev.bak` rollback backup, swaps the running `$APPIMAGE` binary in place, strips AppImage mount env vars, and relaunches cleanly—keeping 100% of wallets, settings, themes, SQLite history, and Docker node storage untouched in `userData`.
+  - Added **Install Local `.AppImage` In-Place…** option, live download progress bar + `SHA-256 Verified` badge in `AnalyticsDeck`, and a clickable update notification pill in `TopHudBar`.
+- **Verification:** Added `src/shared/updaterUtils.ts` + `tests/updaterUtils.test.ts` (4 new unit tests; **112/112** total Vitest tests passing across 20 suites).
+
 ## [0.2.10-beta] - 2026-11-27
 
 ### Added

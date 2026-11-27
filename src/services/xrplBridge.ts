@@ -336,7 +336,7 @@ export function getXrplBridge(): Omit<XrplDesktopApi, 'isElectron' | 'platform' 
   return {
     isElectron: false,
     platform: 'web-preview',
-    version: '0.2.10-beta',
+    version: '0.2.11-beta',
     connectNetwork: (n, c) => fb.connectNetwork(n, c),
     getStreamStatus: () => fb.getStreamStatus(),
     rpcRequest: (cmd, params) => fb.rpcRequest(cmd, params),
@@ -461,21 +461,36 @@ export function getXrplBridge(): Omit<XrplDesktopApi, 'isElectron' | 'platform' 
     systemGetTrayUpdaterState: async (): Promise<TrayAndUpdaterSettings> => ({
       minimizeToTray: false,
       nodeWatchdogEnabled: false,
-      currentVersion: '0.2.10-beta',
+      currentVersion: '0.2.11-beta',
       updateState: 'idle',
     }),
     systemUpdateTraySettings: async () => ({
       minimizeToTray: false,
       nodeWatchdogEnabled: false,
-      currentVersion: '0.2.10-beta',
+      currentVersion: '0.2.11-beta',
       updateState: 'idle',
     }),
     systemCheckForUpdates: async () => ({
       minimizeToTray: false,
       nodeWatchdogEnabled: false,
-      currentVersion: '0.2.10-beta',
+      currentVersion: '0.2.11-beta',
       updateState: 'idle',
     }),
+    systemDownloadUpdate: async () => ({
+      minimizeToTray: false,
+      nodeWatchdogEnabled: false,
+      currentVersion: '0.2.11-beta',
+      updateState: 'error',
+      updateMessage: 'In-app updates require the packaged desktop application.',
+    }),
+    systemInstallUpdate: desktopOnlyErr,
+    systemInstallLocalAppImage: desktopOnlyErr,
+    systemSetUpdaterToken: async () => ({
+      ok: false,
+      hasSavedToken: false,
+      error: 'Desktop Electron mode required.',
+    }),
+    onUpdaterState: () => () => undefined,
 
     fetchMarketPrices: async () => ({
       xrpUsd: null,

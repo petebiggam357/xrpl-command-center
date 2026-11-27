@@ -1,11 +1,15 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   BellRing,
+  CheckCircle2,
   Database,
   Download,
   FileDown,
+  FolderUp,
+  KeyRound,
   Palette,
   RefreshCw,
+  RotateCw,
   ShieldCheck,
   Sparkles,
   Wrench,
@@ -30,6 +34,9 @@ export const AnalyticsDeck: React.FC = () => {
   const [trayState, setTrayState] = useState<TrayAndUpdaterSettings | null>(null);
   const [loading, setLoading] = useState(false);
   const [exportBanner, setExportBanner] = useState<string | null>(null);
+  const [showAdvancedUpdater, setShowAdvancedUpdater] = useState(false);
+  const [tokenInput, setTokenInput] = useState('');
+  const [updaterActionNote, setUpdaterActionNote] = useState<string | null>(null);
   const chartCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const allocation = useMemo(
@@ -56,6 +63,10 @@ export const AnalyticsDeck: React.FC = () => {
 
   useEffect(() => {
     void loadAll();
+    const unsub = getXrplBridge().onUpdaterState((next) => {
+      setTrayState(next);
+    });
+    return () => unsub();
   }, []);
 
   // Draw historical ledger throughput sparkline from SQLite series
@@ -265,25 +276,185 @@ export const AnalyticsDeck: React.FC = () => {
             </div>
           </label>
 
-          <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-2 font-mono text-xs">
-            <div className="flex items-center justify-between">
+          <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-2.5 font-mono text-xs">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-slate-400 flex items-center gap-1.5">
                 <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
-                Installed Release: <strong className="text-white">v{trayState?.currentVersion ?? '0.2.10-beta'}</strong>
+                Installed Release:{' '}
+                <strong className="text-white">v{trayState?.currentVersion ?? '0.2.11-beta'}</strong>
               </span>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  disabled={
+                    trayState?.updateState === 'checking' || trayState?.updateState === 'downloading'
+                  }
+                  onClick={async () => {
+                    setUpdaterActionNote(null);
+                    const st = await getXrplBridge().systemCheckForUpdates();
+                    setTrayState(st);
+                  }}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded bg-cyan-500/20 border border-cyan-400/40 text-[11px] text-cyan-200 hover:bg-cyan-500/30 disabled:opacity-50"
+                >
+                  <RefreshCw
+                    className={`w-3 h-3 ${trayState?.updateState === 'checking' ? 'animate-spin' : ''}`}
+                  />
+                  Check Updates
+                </button>
+
+                {trayState?.updateState === 'available' && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setUpdaterActionNote(null);
+                      const st = await getXrplBridge().systemDownloadUpdate();
+                      setTrayState(st);
+                    }}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded bg-emerald-500/25 border border-emerald-400/60 text-[11px] font-semibold text-emerald-100 hover:bg-emerald-500/35"
+                  >
+                    <Download className="w-3 h-3" />
+                    Download v{trayState.availableVersion}
+                  </button>
+                )}
+
+                {trayState?.updateState === 'downloaded' && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const res = await getXrplBridge().systemInstallUpdate();
+                      if (res.message) setUpdaterActionNote(res.message);
+                      else if (res.error) setUpdaterActionNote(res.error);
+                    }}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded bg-emerald-500/30 border border-emerald-300/70 text-[11px] font-bold text-white hover:bg-emerald-500/45 shadow-glowCyan"
+                  >
+                    <RotateCw className="w-3 h-3" />
+                    Restart &amp; Install v{trayState.availableVersion}
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Live Download Progress Bar */}
+            {trayState?.updateState === 'downloading' && (
+              <div className="space-y-1">
+                <div className="h-2 rounded-full bg-slate-900 border border-slate-800 overflow-hidden">
+                  <div
+                    className="h-full bg-gradient-to-r from-cyan-400 to-emerald-400 transition-all duration-200"
+                    style={{ width: `${Math.max(4, trayState.downloadPercent ?? 0)}%` }}
+                  />
+                </div>
+                <div className="flex justify-between text-[10px] text-cyan-300 tabular-nums">
+                  <span>{trayState.downloadPercent ?? 0}%</span>
+                  <span>
+                    {trayState.downloadedBytes
+                      ? `${(trayState.downloadedBytes / (1024 * 1024)).toFixed(1)} MB`
+                      : ''}
+                    {trayState.totalBytes
+                      ? ` / ${(trayState.totalBytes / (1024 * 1024)).toFixed(1)} MB`
+                      : ''}
+                    {trayState.bytesPerSecond
+                      ? ` • ${(trayState.bytesPerSecond / (1024 * 1024)).toFixed(1)} MB/s`
+                      : ''}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Status Message + SHA-256 Verified Pill */}
+            {(trayState?.updateMessage || updaterActionNote) && (
+              <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-300">
+                {trayState?.sha256Verified && (
+                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/15 border border-emerald-400/40 text-[10px] text-emerald-300">
+                    <CheckCircle2 className="w-3 h-3" />
+                    SHA-256 Verified
+                  </span>
+                )}
+                <span>{updaterActionNote ?? trayState?.updateMessage}</span>
+              </div>
+            )}
+
+            {/* Zero Data Loss Guarantee Banner */}
+            <div className="flex items-start gap-2 p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/25 text-[10px] text-emerald-200 leading-relaxed">
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+              <div>
+                <strong>Settings &amp; Wallets Always Preserved:</strong> Your Rust vault, SQLite
+                analytics, themes, watchlist, price alerts &amp; Docker node path live safely in{' '}
+                <span className="text-cyan-200 break-all">
+                  {trayState?.userDataDir ?? 'Electron userData'}
+                </span>{' '}
+                — upgrading swaps only the app binary (keeping a <code>.prev.bak</code> rollback on
+                Linux AppImage).
+              </div>
+            </div>
+
+            {/* Expandable Local AppImage Swap & Private Repo Token Controls */}
+            <div className="pt-0.5 flex flex-wrap items-center justify-between gap-2 text-[10px]">
               <button
                 type="button"
-                onClick={async () => {
-                  const st = await getXrplBridge().systemCheckForUpdates();
-                  setTrayState(st);
-                }}
-                className="px-2.5 py-1 rounded bg-cyan-500/20 border border-cyan-400/40 text-[11px] text-cyan-200"
+                onClick={() => setShowAdvancedUpdater((v) => !v)}
+                className="text-slate-400 hover:text-cyan-300 underline decoration-dotted"
               >
-                Check Updates
+                {showAdvancedUpdater
+                  ? 'Hide Advanced Updater Options'
+                  : 'Private Repo Token / Local .AppImage Upgrade…'}
               </button>
+              {trayState?.hasSavedToken && (
+                <span className="text-emerald-400">Private GitHub token saved</span>
+              )}
             </div>
-            {trayState?.updateMessage && (
-              <div className="text-[11px] text-slate-400">{trayState.updateMessage}</div>
+
+            {showAdvancedUpdater && (
+              <div className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800 space-y-2.5 text-[11px]">
+                <div className="flex flex-wrap items-center gap-2">
+                  <KeyRound className="w-3.5 h-3.5 text-amber-300 shrink-0" />
+                  <input
+                    type="password"
+                    value={tokenInput}
+                    onChange={(e) => setTokenInput(e.target.value)}
+                    placeholder="Optional GitHub PAT (only needed if repo is private & gh CLI not signed in)"
+                    className="flex-1 min-w-[200px] rounded bg-slate-950 border border-slate-700 px-2 py-1 text-[11px] text-white"
+                  />
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const res = await getXrplBridge().systemSetUpdaterToken(
+                        tokenInput.trim() || null
+                      );
+                      setTokenInput('');
+                      setUpdaterActionNote(
+                        res.ok
+                          ? res.hasSavedToken
+                            ? 'Encrypted GitHub token saved locally. Click Check Updates.'
+                            : 'Saved GitHub token cleared.'
+                          : res.error ?? 'Failed to save token.'
+                      );
+                    }}
+                    className="px-2 py-1 rounded bg-cyan-500/20 border border-cyan-400/40 text-cyan-200 hover:bg-cyan-500/30"
+                  >
+                    {tokenInput.trim() ? 'Save Token' : 'Clear Token'}
+                  </button>
+                </div>
+
+                {trayState?.runningAppImagePath && (
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-800">
+                    <span className="text-[10px] text-slate-400 truncate max-w-[280px]">
+                      Running AppImage: {trayState.runningAppImagePath}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const res = await getXrplBridge().systemInstallLocalAppImage();
+                        if (res.message) setUpdaterActionNote(res.message);
+                        else if (res.error) setUpdaterActionNote(res.error);
+                      }}
+                      className="flex items-center gap-1 px-2.5 py-1 rounded bg-violet-500/20 border border-violet-400/40 text-[10px] text-violet-200 hover:bg-violet-500/30"
+                    >
+                      <FolderUp className="w-3 h-3" />
+                      Install Local .AppImage In-Place…
+                    </button>
+                  </div>
+                )}
+              </div>
             )}
           </div>
         </div>

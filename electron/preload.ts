@@ -27,7 +27,7 @@ function subscribeChannel<T>(channel: string, cb: (payload: T) => void): () => v
 const api: XrplDesktopApi = {
   isElectron: true,
   platform: process.platform,
-  version: '0.2.10-beta',
+  version: '0.2.11-beta',
   connectNetwork: (networkId: NetworkId, customEndpoint?: string) =>
     ipcRenderer.invoke('xrpl:connect', networkId, customEndpoint),
   getStreamStatus: () => ipcRenderer.invoke('xrpl:getStatus'),
@@ -116,6 +116,12 @@ const api: XrplDesktopApi = {
   systemUpdateTraySettings: (patch: { minimizeToTray?: boolean; nodeWatchdogEnabled?: boolean }) =>
     ipcRenderer.invoke('system:updateTraySettings', patch),
   systemCheckForUpdates: () => ipcRenderer.invoke('system:checkForUpdates'),
+  systemDownloadUpdate: () => ipcRenderer.invoke('system:downloadUpdate'),
+  systemInstallUpdate: () => ipcRenderer.invoke('system:installUpdate'),
+  systemInstallLocalAppImage: () => ipcRenderer.invoke('system:installLocalAppImage'),
+  systemSetUpdaterToken: (token: string | null) =>
+    ipcRenderer.invoke('system:setUpdaterToken', token),
+  onUpdaterState: (cb) => subscribeChannel('system:updaterState', cb),
 
   // v0.1.0-beta: Live Prices, Amendment Voting, X-Address Codec & Encrypted Vault Backups
   fetchMarketPrices: () => ipcRenderer.invoke('market:fetchPrices'),

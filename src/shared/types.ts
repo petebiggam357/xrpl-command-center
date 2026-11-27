@@ -815,6 +815,18 @@ export interface TrayAndUpdaterSettings {
   updateState: 'idle' | 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error';
   availableVersion?: string;
   updateMessage?: string;
+  downloadPercent?: number;
+  downloadedBytes?: number;
+  totalBytes?: number;
+  bytesPerSecond?: number;
+  releaseNotes?: string;
+  releaseUrl?: string;
+  updateChannel?: 'electron-updater' | 'github-direct' | 'local-file';
+  sha256Verified?: boolean;
+  userDataDir?: string;
+  runningAppImagePath?: string | null;
+  canInstallInPlace?: boolean;
+  hasSavedToken?: boolean;
 }
 
 // ============================================================================
@@ -1030,6 +1042,11 @@ export interface XrplDesktopApi {
   systemGetTrayUpdaterState: () => Promise<TrayAndUpdaterSettings>;
   systemUpdateTraySettings: (patch: { minimizeToTray?: boolean; nodeWatchdogEnabled?: boolean }) => Promise<TrayAndUpdaterSettings>;
   systemCheckForUpdates: () => Promise<TrayAndUpdaterSettings>;
+  systemDownloadUpdate: () => Promise<TrayAndUpdaterSettings>;
+  systemInstallUpdate: () => Promise<{ ok: boolean; message?: string; error?: string }>;
+  systemInstallLocalAppImage: () => Promise<{ ok: boolean; cancelled?: boolean; message?: string; error?: string }>;
+  systemSetUpdaterToken: (token: string | null) => Promise<{ ok: boolean; hasSavedToken: boolean; error?: string }>;
+  onUpdaterState: (cb: (state: TrayAndUpdaterSettings) => void) => () => void;
 
   // v0.1.0-beta: Live Prices, Amendment Voting, X-Address Codec & Encrypted Vault Backups
   fetchMarketPrices: () => Promise<MarketPriceSnapshot>;

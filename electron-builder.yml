@@ -1,6 +1,11 @@
 appId: com.xrpl.command-center
 productName: XRPL Command Center
 copyright: Copyright © 2026 XRPL Command Center Contributors
+publish:
+  provider: github
+  owner: petebiggam357
+  repo: xrpl-command-center
+  releaseType: prerelease
 directories:
   output: release
   buildResources: build

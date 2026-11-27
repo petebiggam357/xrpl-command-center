@@ -50,7 +50,7 @@ export const QuickStartModal: React.FC = () => {
           </div>
           <div>
             <div className="text-[10px] font-mono uppercase tracking-[0.2em] text-cyan-400">
-              XRPL Command Center • v0.2.10-beta
+              XRPL Command Center • v0.2.11-beta
             </div>
             <h2 className="text-lg font-bold text-white">
               Welcome to Your XRPL Mission Control
