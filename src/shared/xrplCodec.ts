@@ -366,12 +366,72 @@ export function classifyTransaction(tx: Record<string, unknown>): {
   };
 }
 
+const CLASSIC_ISSUER_RE = /^r[1-9A-HJ-NP-Za-km-z]{24,34}$/;
+const HEX_CURRENCY_40_RE = /^[0-9A-Fa-f]{40}$/;
+
+/**
+ * Extracts every non-XRP issued currency (currency, currencyRaw, issuer) present
+ * anywhere in a raw XRPL transaction (Payment, OfferCreate, TrustSet, AMM*, Check*, Clawback).
+ */
+export function extractIssuedTokensFromTx(
+  tx: Record<string, unknown>,
+  options?: { includeLpTokens?: boolean }
+): Array<{ currency: string; currencyRaw: string; issuer: string }> {
+  const includeLp = Boolean(options?.includeLpTokens);
+  const found = new Map<string, { currency: string; currencyRaw: string; issuer: string }>();
+
+  const consider = (candidate: unknown) => {
+    if (!candidate || typeof candidate !== 'object') return;
+    const obj = candidate as Record<string, unknown>;
+    const rawCur = typeof obj.currency === 'string' ? obj.currency.trim() : '';
+    const issuer = typeof obj.issuer === 'string' ? obj.issuer.trim() : '';
+    if (!rawCur || rawCur.toUpperCase() === 'XRP' || !CLASSIC_ISSUER_RE.test(issuer)) return;
+    if (!includeLp && HEX_CURRENCY_40_RE.test(rawCur) && rawCur.toUpperCase().startsWith('03')) return;
+
+    let currencyRaw: string;
+    try {
+      currencyRaw = encodeCurrencyCode(rawCur);
+    } catch {
+      currencyRaw = rawCur;
+    }
+    const currency = decodeCurrencyCode(currencyRaw);
+    const key = `${currencyRaw}:${issuer}`;
+    if (!found.has(key)) {
+      found.set(key, { currency, currencyRaw, issuer });
+    }
+  };
+
+  const fields = [
+    tx.Amount,
+    tx.DeliverMax,
+    tx.SendMax,
+    tx.DeliverMin,
+    tx.TakerGets,
+    tx.TakerPays,
+    tx.LimitAmount,
+    tx.Amount2,
+    tx.Asset,
+    tx.Asset2,
+    tx.LPTokenIn,
+    tx.LPTokenOut,
+    tx.BidMin,
+    tx.BidMax,
+  ];
+  for (const field of fields) {
+    if (isIssuedAmount(field) || (field && typeof field === 'object' && 'currency' in field && 'issuer' in field)) {
+      consider(field);
+    }
+  }
+  return Array.from(found.values());
+}
+
 export function parseLiveTransactionEvent(msg: Record<string, unknown>): LiveTransaction | null {
   const tx = (msg.transaction ?? msg.tx_json ?? msg) as Record<string, unknown> | undefined;
   if (!tx || typeof tx.TransactionType !== 'string') return null;
 
   const hash = String(msg.hash ?? tx.hash ?? `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`);
   const classified = classifyTransaction(tx);
+  const observedTokens = extractIssuedTokensFromTx(tx);
   const feeDrops = Number(tx.Fee ?? 12) || 12;
   const validated = Boolean(msg.validated);
   const isWhale = classified.currency === 'XRP' && classified.amountXrpEstimate >= 100_000;
@@ -387,6 +447,7 @@ export function parseLiveTransactionEvent(msg: Record<string, unknown>): LiveTra
     amountXrpEstimate: classified.amountXrpEstimate,
     currency: classified.currency,
     issuer: classified.issuer,
+    observedTokens: observedTokens.length > 0 ? observedTokens : undefined,
     feeDrops,
     validated,
     engineResult: typeof msg.engine_result === 'string' ? msg.engine_result : undefined,

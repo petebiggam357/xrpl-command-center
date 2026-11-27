@@ -40,12 +40,14 @@ import { buildTaxReadyCsv, redactDiagnosticText } from '../src/shared/v020Utils'
 import { AnalyticsSqliteService } from './analyticsService';
 import { DirectoryService } from './directoryService';
 import { DockerNodeService } from './dockerNodeService';
+import { McpAgentService } from './mcpAgentService';
 import { NodeOpsService } from './nodeOpsService';
 import { resolveRustSidecarBinaryPath, RustVaultSidecarClient } from './rustVaultClient';
 import { WalletVaultService } from './walletVaultService';
 import { XrplStreamManager } from './xrplStream';
+import type { AgentProviderId, LedgerSnapshot } from '../src/shared/types';
 
-const APP_VERSION = '0.2.11-beta';
+const APP_VERSION = '0.3.0-beta';
 const GITHUB_OWNER = 'petebiggam357';
 const GITHUB_REPO = 'xrpl-command-center';
 const LEDGER_USB_VENDOR_ID = 0x2c97;
@@ -73,6 +75,7 @@ let lastMonitoredNodeConfig: NodeConnectionConfig = {
   rpcUrl: 'http://127.0.0.1:5005',
 };
 let lastNodeHealthy: boolean | null = null;
+const recentLedgers: LedgerSnapshot[] = [];
 
 const trayUpdaterState: TrayAndUpdaterSettings = {
   minimizeToTray: false,
@@ -87,6 +90,7 @@ const nodeOpsService = new NodeOpsService();
 let walletVault: WalletVaultService;
 let dockerService: DockerNodeService;
 let analyticsService: AnalyticsSqliteService;
+let mcpAgentService: McpAgentService;
 
 function sendToRenderer(channel: string, payload: unknown): void {
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -106,6 +110,10 @@ function showOsNotification(payload: DesktopNotificationPayload): void {
 
 streamManager.on('status', (status) => sendToRenderer('xrpl:status', status));
 streamManager.on('ledger', (ledger) => {
+  if (recentLedgers[0]?.ledgerIndex !== ledger.ledgerIndex) {
+    recentLedgers.unshift(ledger);
+    if (recentLedgers.length > 30) recentLedgers.length = 30;
+  }
   sendToRenderer('xrpl:ledger', ledger);
   if (analyticsService) {
     void analyticsService
@@ -647,8 +655,15 @@ function registerIpcHandlers(): void {
     return directoryService.fetchValidators(networkId);
   });
 
-  ipcMain.handle('xrpl:fetchTokens', (_evt, networkId: NetworkId) => {
-    return directoryService.fetchTokens(networkId);
+  ipcMain.handle(
+    'xrpl:fetchTokens',
+    (_evt, networkId: NetworkId, options?: { limit?: number; offset?: number; sortBy?: string }) => {
+      return directoryService.fetchTokens(networkId, options);
+    }
+  );
+
+  ipcMain.handle('xrpl:searchTokens', (_evt, query: string, networkId: NetworkId) => {
+    return directoryService.searchTokens(streamManager, query, networkId);
   });
 
   ipcMain.handle('xrpl:inspectToken', (_evt, currencyRaw: string, issuer: string) => {
@@ -1335,8 +1350,40 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle('wallet:setAutoLockMinutes', (_evt, minutes: number) => {
     const applied = walletVault.setAutoLockMinutes(minutes);
-    return { ok: true, minutes: applied };
+    return { ok: true, minutes: applied, autoLockAt: walletVault.getAutoLockAt() };
   });
+
+  // v0.3.0-beta: Local MCP Server & In-App Agent Copilot IPC
+  ipcMain.handle('mcp:getStatus', () => mcpAgentService.getStatus());
+  ipcMain.handle(
+    'mcp:updateConfig',
+    (
+      _evt,
+      patch: { enabled?: boolean; port?: number; allowAutomation?: boolean; allowTxDrafting?: boolean }
+    ) => mcpAgentService.updateConfig(patch)
+  );
+  ipcMain.handle('mcp:rotateToken', () => mcpAgentService.rotateToken());
+  ipcMain.handle(
+    'mcp:updateProvider',
+    (
+      _evt,
+      patch: {
+        provider?: AgentProviderId;
+        endpointUrl?: string;
+        model?: string;
+        apiKey?: string | null;
+      }
+    ) => mcpAgentService.updateProvider(patch)
+  );
+  ipcMain.handle('mcp:clearAuditLog', () => mcpAgentService.clearAuditLog());
+  ipcMain.handle(
+    'agent:sendMessage',
+    (
+      _evt,
+      message: string,
+      history?: Array<{ role: 'user' | 'assistant'; content: string }>
+    ) => mcpAgentService.runAgentChat(message, history ?? [])
+  );
 
   ipcMain.handle(
     'wallet:exportSecurityAudit',
@@ -1408,6 +1455,7 @@ function registerIpcHandlers(): void {
               unlocked: vaultSt.unlocked,
               backend: vaultSt.backend,
               kdf: vaultSt.kdf,
+              autoLockMinutes: vaultSt.autoLockMinutes,
               accountCount: vaultSt.accounts.length,
             }
           : null,
@@ -1458,19 +1506,40 @@ app.whenReady().then(() => {
     rustSidecar.start();
   }
 
-  walletVault = new WalletVaultService(
-    userDataDir,
-    {
-      isAvailable: () => safeStorage.isEncryptionAvailable(),
-      encrypt: (plain) => safeStorage.encryptString(plain),
-      decrypt: (buf) => safeStorage.decryptString(buf),
-    },
-    rustSidecar
-  );
+  const osCipher = {
+    isAvailable: () => safeStorage.isEncryptionAvailable(),
+    encrypt: (plain: string) => safeStorage.encryptString(plain),
+    decrypt: (buf: Buffer) => safeStorage.decryptString(buf),
+  };
+
+  walletVault = new WalletVaultService(userDataDir, osCipher, rustSidecar);
+  walletVault.setOnLockListener(() => {
+    void walletVault
+      .getStatus()
+      .then((st) => sendToRenderer('wallet:vaultStatusChanged', st))
+      .catch(() => undefined);
+  });
+
   dockerService = new DockerNodeService(userDataDir);
   analyticsService = new AnalyticsSqliteService(userDataDir);
+  mcpAgentService = new McpAgentService({
+    storageDir: userDataDir,
+    appVersion: APP_VERSION,
+    streamManager,
+    directoryService,
+    nodeOpsService,
+    dockerService,
+    walletVault,
+    getRecentLedgers: () => recentLedgers,
+    getLastNodeConfig: () => lastMonitoredNodeConfig,
+    emitStatus: (st) => sendToRenderer('mcp:status', st),
+    emitRendererAction: (action) => sendToRenderer('mcp:rendererAction', action),
+    osCipher,
+  });
+
   void analyticsService.init();
   void walletVault.getStatus().catch(() => undefined);
+  void mcpAgentService.init().catch(() => undefined);
 
   configureAutoUpdater();
   registerIpcHandlers();
@@ -1491,6 +1560,7 @@ app.whenReady().then(() => {
 app.on('before-quit', () => {
   isQuitting = true;
   if (watchdogTimer) clearInterval(watchdogTimer);
+  void mcpAgentService?.shutdown();
   walletVault?.lock();
   rustSidecar?.shutdown();
   void analyticsService?.close();

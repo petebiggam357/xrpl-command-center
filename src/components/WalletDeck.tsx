@@ -88,11 +88,16 @@ export const WalletDeck: React.FC = () => {
   const marketPrice = useCommandStore((s) => s.marketPrice);
   const walletBalancesMap = useCommandStore((s) => s.walletBalancesMap);
   const refreshAllWalletBalances = useCommandStore((s) => s.refreshAllWalletBalances);
+  const autoLockMinutes = useCommandStore((s) => s.autoLockMinutes);
+  const setAutoLockMinutes = useCommandStore((s) => s.setAutoLockMinutes);
+
+  const isVaultLocked = vaultStatus.initialized && !vaultStatus.unlocked;
 
   const [subTab, setSubTab] = useState<WalletSubTab>('portfolio');
   const [txHistorySearch, setTxHistorySearch] = useState('');
   const [hardwareModalOpen, setHardwareModalOpen] = useState(false);
   const [syncingAllBalances, setSyncingAllBalances] = useState(false);
+  const [nowTick, setNowTick] = useState(() => Date.now());
 
   // Vault & Onboarding
   const [passphrase, setPassphrase] = useState('');
@@ -106,6 +111,37 @@ export const WalletDeck: React.FC = () => {
   const [backupConfirmed, setBackupConfirmed] = useState(false);
   const [copiedAddr, setCopiedAddr] = useState(false);
   const [faucetLoading, setFaucetLoading] = useState(false);
+
+  // Immediately close modals & wipe transient sensitive view state when vault locks
+  useEffect(() => {
+    if (isVaultLocked) {
+      setModalMode(null);
+      setHardwareModalOpen(false);
+      setOneTimeBackup(null);
+      setShowQuantumPanel(false);
+      setImportSeedInput('');
+      setWatchAddrInput('');
+      setVaultBannerMsg((prev) =>
+        prev && /\br[1-9A-HJ-NP-Za-km-z]{24,34}\b/.test(prev.text) ? null : prev
+      );
+    }
+  }, [isVaultLocked]);
+
+  // Refresh lock countdown indicator every 15s while unlocked with active timeout
+  useEffect(() => {
+    if (!vaultStatus.unlocked || !vaultStatus.autoLockAt) return;
+    setNowTick(Date.now());
+    const id = setInterval(() => setNowTick(Date.now()), 15_000);
+    return () => clearInterval(id);
+  }, [vaultStatus.unlocked, vaultStatus.autoLockAt]);
+
+  const lockCountdownText = useMemo(() => {
+    if (!vaultStatus.unlocked) return null;
+    if (autoLockMinutes === 0 || !vaultStatus.autoLockAt) return 'Manual Lock';
+    const remMs = Math.max(0, vaultStatus.autoLockAt - nowTick);
+    const remMin = Math.ceil(remMs / 60_000);
+    return remMin <= 1 ? '<1m left' : `${remMin}m left`;
+  }, [vaultStatus.unlocked, vaultStatus.autoLockAt, autoLockMinutes, nowTick]);
 
   // 1) Payment & TrustSet
   const [payDest, setPayDest] = useState('');
@@ -843,6 +879,44 @@ export const WalletDeck: React.FC = () => {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            {/* Configurable Vault Auto-Lock Timeout Selector */}
+            <label
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-950/90 border border-slate-800 text-xs font-mono text-slate-300"
+              title="Adjust how long the vault stays unlocked before automatically locking and hiding wallet data"
+            >
+              <Clock className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+              <span className="text-[10px] uppercase text-slate-400">Auto-Lock:</span>
+              <select
+                aria-label="Vault lock timeout"
+                value={autoLockMinutes}
+                onChange={(e) => {
+                  const mins = Number(e.target.value);
+                  void setAutoLockMinutes(mins);
+                  setVaultBannerMsg({
+                    ok: true,
+                    text:
+                      mins === 0
+                        ? 'Vault auto-lock set to Manual Only (stays unlocked until you click Lock or quit).'
+                        : `Vault auto-lock timeout updated to ${mins} minute${mins === 1 ? '' : 's'}.`,
+                  });
+                }}
+                className="bg-transparent text-xs font-mono text-cyan-200 focus:outline-none cursor-pointer"
+              >
+                <option value={1} className="bg-slate-950 text-white">1m</option>
+                <option value={5} className="bg-slate-950 text-white">5m</option>
+                <option value={15} className="bg-slate-950 text-white">15m</option>
+                <option value={30} className="bg-slate-950 text-white">30m</option>
+                <option value={60} className="bg-slate-950 text-white">60m</option>
+                <option value={120} className="bg-slate-950 text-white">2h</option>
+                <option value={0} className="bg-slate-950 text-white">Never</option>
+              </select>
+              {lockCountdownText && (
+                <span className="text-[10px] text-emerald-300/90 border-l border-slate-700 pl-1.5 tabular-nums">
+                  {lockCountdownText}
+                </span>
+              )}
+            </label>
+
             {vaultStatus.unlocked && (
               <>
                 <button
@@ -864,33 +938,37 @@ export const WalletDeck: React.FC = () => {
               </>
             )}
 
-            <button
-              type="button"
-              onClick={() => setHardwareModalOpen(true)}
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-violet-500/15 border border-violet-400/40 text-xs font-mono text-violet-200 hover:bg-violet-500/25"
-            >
-              <Cpu className="w-3.5 h-3.5" />
-              Cold / Hardware
-            </button>
+            {!isVaultLocked && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setHardwareModalOpen(true)}
+                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-violet-500/15 border border-violet-400/40 text-xs font-mono text-violet-200 hover:bg-violet-500/25"
+                >
+                  <Cpu className="w-3.5 h-3.5" />
+                  Cold / Hardware
+                </button>
 
-            <button
-              type="button"
-              onClick={() => setModalMode('watch')}
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs font-mono text-slate-200 hover:border-cyan-400/50"
-            >
-              <Eye className="w-3.5 h-3.5 text-cyan-400" />
-              Watch Address
-            </button>
+                <button
+                  type="button"
+                  onClick={() => setModalMode('watch')}
+                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs font-mono text-slate-200 hover:border-cyan-400/50"
+                >
+                  <Eye className="w-3.5 h-3.5 text-cyan-400" />
+                  Watch Address
+                </button>
 
-            <button
-              type="button"
-              onClick={() => void handleExportVaultBackup()}
-              title="Export encrypted .xrplvault backup (Argon2id + AES-256-GCM ciphertext only)"
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs font-mono text-slate-200 hover:border-emerald-400/50"
-            >
-              <Download className="w-3.5 h-3.5 text-emerald-400" />
-              Backup
-            </button>
+                <button
+                  type="button"
+                  onClick={() => void handleExportVaultBackup()}
+                  title="Export encrypted .xrplvault backup (Argon2id + AES-256-GCM ciphertext only)"
+                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs font-mono text-slate-200 hover:border-emerald-400/50"
+                >
+                  <Download className="w-3.5 h-3.5 text-emerald-400" />
+                  Backup
+                </button>
+              </>
+            )}
 
             <button
               type="button"
@@ -923,7 +1001,7 @@ export const WalletDeck: React.FC = () => {
             <Unlock className="w-4 h-4 text-cyan-400 shrink-0" />
             <span className="text-xs font-mono text-slate-300">
               {vaultStatus.initialized
-                ? 'Unlock your encrypted vault to create wallets or sign transactions:'
+                ? 'Unlock your encrypted vault to reveal wallets, balances & signing tools:'
                 : 'Set a master passphrase (8+ chars) to initialize your local encrypted signing vault:'}
             </span>
             <input
@@ -962,7 +1040,43 @@ export const WalletDeck: React.FC = () => {
         )}
       </div>
 
-      {/* Main Split */}
+      {/* Vault Locked Privacy Shield — hides ALL wallet addresses, balances & DeFi data until unlocked */}
+      {isVaultLocked ? (
+        <div className="hud-panel rounded-2xl p-10 text-center space-y-4 border border-amber-400/25 bg-slate-950/80">
+          <div className="w-14 h-14 mx-auto rounded-2xl bg-amber-500/15 border border-amber-400/40 flex items-center justify-center">
+            <Lock className="w-7 h-7 text-amber-300" />
+          </div>
+          <div className="space-y-1.5 max-w-lg mx-auto">
+            <h3 className="text-sm font-bold uppercase tracking-[0.16em] text-amber-200">
+              Vault Locked — Wallet Data Hidden
+            </h3>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              For your privacy and security, all wallet addresses, XRP &amp; token balances, combined net worth,
+              trustlines, NFTs, and transaction history are completely hidden while the vault is locked.
+            </p>
+            <p className="text-[11px] font-mono text-cyan-300/80 pt-1">
+              Enter your master passphrase above to unlock your vault and reveal your wallets.
+            </p>
+          </div>
+          <div className="inline-flex flex-wrap items-center justify-center gap-3 px-4 py-2 rounded-xl bg-slate-900/80 border border-slate-800 font-mono text-[11px] text-slate-400">
+            <span className="inline-flex items-center gap-1.5 text-emerald-300">
+              <ShieldCheck className="w-3.5 h-3.5" />
+              {vaultStatus.backend === 'rust-sidecar'
+                ? 'Rust Sidecar Zeroized'
+                : 'AES-256-GCM Keys Cleared'}
+            </span>
+            <span className="text-slate-700">•</span>
+            <span className="inline-flex items-center gap-1.5">
+              <Clock className="w-3.5 h-3.5 text-cyan-400" />
+              Auto-Lock:{' '}
+              <strong className="text-slate-200">
+                {autoLockMinutes === 0 ? 'Manual Only' : `${autoLockMinutes} min`}
+              </strong>
+            </span>
+          </div>
+        </div>
+      ) : (
+      /* Main Split */
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
         <div className="xl:col-span-3 hud-panel rounded-xl p-3.5 space-y-2.5 h-fit">
           <div className="flex items-center justify-between px-1">
@@ -2749,9 +2863,10 @@ export const WalletDeck: React.FC = () => {
           )}
         </div>
       </div>
+      )}
 
       {/* Onboarding & QR Modals */}
-      {modalMode && (
+      {!isVaultLocked && modalMode && (
         <div
           className="fixed inset-0 z-40 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4"
           onClick={() => setModalMode(null)}

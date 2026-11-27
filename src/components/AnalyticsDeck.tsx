@@ -7,6 +7,7 @@ import {
   FileDown,
   FolderUp,
   KeyRound,
+  Lock,
   Palette,
   RefreshCw,
   RotateCw,
@@ -29,6 +30,10 @@ export const AnalyticsDeck: React.FC = () => {
   const portfolioHistory = useCommandStore((s) => s.portfolioHistory);
   const walletPortfolio = useCommandStore((s) => s.walletPortfolio);
   const marketPrice = useCommandStore((s) => s.marketPrice);
+  const vaultStatus = useCommandStore((s) => s.vaultStatus);
+  const setActiveTab = useCommandStore((s) => s.setActiveTab);
+
+  const isVaultLocked = vaultStatus.initialized && !vaultStatus.unlocked;
 
   const [summary, setSummary] = useState<SqliteAnalyticsSummary | null>(null);
   const [trayState, setTrayState] = useState<TrayAndUpdaterSettings | null>(null);
@@ -281,7 +286,7 @@ export const AnalyticsDeck: React.FC = () => {
               <span className="text-slate-400 flex items-center gap-1.5">
                 <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
                 Installed Release:{' '}
-                <strong className="text-white">v{trayState?.currentVersion ?? '0.2.11-beta'}</strong>
+                <strong className="text-white">v{trayState?.currentVersion ?? '0.3.0-beta'}</strong>
               </span>
               <div className="flex items-center gap-1.5">
                 <button
@@ -502,10 +507,13 @@ export const AnalyticsDeck: React.FC = () => {
                 onChange={(e) => void setAutoLockMinutes(Number(e.target.value))}
                 className="rounded-lg bg-slate-950 border border-slate-700 px-2.5 py-1 text-xs text-white"
               >
+                <option value={1}>1 minute</option>
                 <option value={5}>5 minutes</option>
                 <option value={15}>15 minutes (Default)</option>
                 <option value={30}>30 minutes</option>
                 <option value={60}>60 minutes</option>
+                <option value={120}>2 hours</option>
+                <option value={0}>Never (Manual Lock)</option>
               </select>
             </div>
 
@@ -555,76 +563,97 @@ export const AnalyticsDeck: React.FC = () => {
               Active Wallet Asset Allocation &amp; Net Worth Snapshots
             </h3>
             <span className="text-[10px] text-slate-400">
-              {portfolioHistory.length} snapshots saved
+              {isVaultLocked ? 'Vault Locked' : `${portfolioHistory.length} snapshots saved`}
             </span>
           </div>
 
-          {allocation.length === 0 ? (
-            <div className="text-xs text-slate-500 py-4">
-              Select a funded wallet in Wallets &amp; DeFi to visualize your XRP vs. token allocation.
+          {isVaultLocked ? (
+            <div className="rounded-xl bg-slate-950/85 border border-amber-400/25 p-5 text-center space-y-2">
+              <Lock className="w-5 h-5 text-amber-300 mx-auto" />
+              <div className="text-xs text-amber-200 font-semibold">
+                Vault Locked — Portfolio &amp; Net Worth Data Hidden
+              </div>
+              <p className="text-[11px] text-slate-400 font-sans">
+                Unlock your vault in Wallets &amp; DeFi to view asset allocation and saved net worth snapshots.
+              </p>
+              <button
+                type="button"
+                onClick={() => setActiveTab('wallets')}
+                className="px-3 py-1 rounded-lg bg-cyan-500/20 border border-cyan-400/50 text-[11px] text-cyan-200 hover:bg-cyan-500/30"
+              >
+                Unlock Vault
+              </button>
             </div>
           ) : (
-            <div className="space-y-2">
-              <div className="h-2.5 rounded-full bg-slate-800 overflow-hidden flex">
-                {allocation.map((slice) => (
-                  <div
-                    key={slice.label}
-                    style={{ width: `${slice.pct}%`, backgroundColor: slice.color }}
-                    title={`${slice.label}: ${slice.pct}%`}
-                  />
-                ))}
-              </div>
-              <div className="flex flex-wrap gap-2 text-[11px]">
-                {allocation.map((slice) => (
-                  <span
-                    key={slice.label}
-                    className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-slate-950 border border-slate-800 text-slate-200"
-                  >
-                    <span className="w-2 h-2 rounded-full" style={{ backgroundColor: slice.color }} />
-                    {slice.label} ({slice.pct}%)
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
+            <>
+              {allocation.length === 0 ? (
+                <div className="text-xs text-slate-500 py-4">
+                  Select a funded wallet in Wallets &amp; DeFi to visualize your XRP vs. token allocation.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <div className="h-2.5 rounded-full bg-slate-800 overflow-hidden flex">
+                    {allocation.map((slice) => (
+                      <div
+                        key={slice.label}
+                        style={{ width: `${slice.pct}%`, backgroundColor: slice.color }}
+                        title={`${slice.label}: ${slice.pct}%`}
+                      />
+                    ))}
+                  </div>
+                  <div className="flex flex-wrap gap-2 text-[11px]">
+                    {allocation.map((slice) => (
+                      <span
+                        key={slice.label}
+                        className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-slate-950 border border-slate-800 text-slate-200"
+                      >
+                        <span className="w-2 h-2 rounded-full" style={{ backgroundColor: slice.color }} />
+                        {slice.label} ({slice.pct}%)
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
 
-          {portfolioHistory.length >= 2 && (
-            <div className="pt-1 border-t border-slate-800/80">
-              <div className="flex items-center justify-between text-[10px] text-slate-400 mb-1">
-                <span>Portfolio Net Worth Trend (XRP)</span>
-                <span className="text-emerald-300 tabular-nums">
-                  {portfolioHistory[portfolioHistory.length - 1].totalXrp.toLocaleString(undefined, {
-                    maximumFractionDigits: 2,
-                  })}{' '}
-                  XRP
-                </span>
-              </div>
-              <svg viewBox="0 0 240 42" className="w-full h-10 overflow-visible">
-                {(() => {
-                  const vals = portfolioHistory.map((p) => p.totalXrp);
-                  const minV = Math.min(...vals);
-                  const maxV = Math.max(...vals);
-                  const span = Math.max(maxV - minV, 0.0001);
-                  const pts = vals
-                    .map((v, i) => {
-                      const x = (i / (vals.length - 1)) * 240;
-                      const y = 38 - ((v - minV) / span) * 34;
-                      return `${x.toFixed(1)},${y.toFixed(1)}`;
-                    })
-                    .join(' ');
-                  return (
-                    <polyline
-                      fill="none"
-                      stroke="#34d399"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      points={pts}
-                    />
-                  );
-                })()}
-              </svg>
-            </div>
+              {portfolioHistory.length >= 2 && (
+                <div className="pt-1 border-t border-slate-800/80">
+                  <div className="flex items-center justify-between text-[10px] text-slate-400 mb-1">
+                    <span>Portfolio Net Worth Trend (XRP)</span>
+                    <span className="text-emerald-300 tabular-nums">
+                      {portfolioHistory[portfolioHistory.length - 1].totalXrp.toLocaleString(undefined, {
+                        maximumFractionDigits: 2,
+                      })}{' '}
+                      XRP
+                    </span>
+                  </div>
+                  <svg viewBox="0 0 240 42" className="w-full h-10 overflow-visible">
+                    {(() => {
+                      const vals = portfolioHistory.map((p) => p.totalXrp);
+                      const minV = Math.min(...vals);
+                      const maxV = Math.max(...vals);
+                      const span = Math.max(maxV - minV, 0.0001);
+                      const pts = vals
+                        .map((v, i) => {
+                          const x = (i / (vals.length - 1)) * 240;
+                          const y = 38 - ((v - minV) / span) * 34;
+                          return `${x.toFixed(1)},${y.toFixed(1)}`;
+                        })
+                        .join(' ');
+                      return (
+                        <polyline
+                          fill="none"
+                          stroke="#34d399"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          points={pts}
+                        />
+                      );
+                    })()}
+                  </svg>
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -634,54 +663,61 @@ export const AnalyticsDeck: React.FC = () => {
         <div className="flex items-center gap-2 mb-3">
           <ShieldCheck className="w-4 h-4 text-cyan-400" />
           <h3 className="text-xs font-semibold uppercase tracking-[0.15em] text-cyan-300">
-            SQLite Tracked Wallet Transaction Journal ({summary?.recentJournal.length ?? 0})
+            SQLite Tracked Wallet Transaction Journal ({isVaultLocked ? 'Hidden' : summary?.recentJournal.length ?? 0})
           </h3>
         </div>
-        <div className="overflow-x-auto max-h-64">
-          <table className="w-full text-left border-collapse font-mono text-xs">
-            <thead className="sticky top-0 bg-panel text-[10px] uppercase text-slate-400 border-b border-slate-800">
-              <tr>
-                <th className="py-1.5 px-2">Timestamp</th>
-                <th className="py-1.5 px-2">Network</th>
-                <th className="py-1.5 px-2">Type</th>
-                <th className="py-1.5 px-2">Account → Dest</th>
-                <th className="py-1.5 px-2">Status</th>
-                <th className="py-1.5 px-2 text-right">Hash</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-800/60">
-              {(summary?.recentJournal ?? []).length === 0 ? (
+        {isVaultLocked ? (
+          <div className="py-6 text-center font-mono text-xs text-slate-400">
+            <Lock className="w-4 h-4 text-amber-300 inline-block mr-1.5 -mt-0.5" />
+            Tracked wallet addresses and transaction history are hidden while the Vault is locked.
+          </div>
+        ) : (
+          <div className="overflow-x-auto max-h-64">
+            <table className="w-full text-left border-collapse font-mono text-xs">
+              <thead className="sticky top-0 bg-panel text-[10px] uppercase text-slate-400 border-b border-slate-800">
                 <tr>
-                  <td colSpan={6} className="py-6 text-center text-slate-500">
-                    Transactions signed or received by your tracked wallets are automatically journaled here.
-                  </td>
+                  <th className="py-1.5 px-2">Timestamp</th>
+                  <th className="py-1.5 px-2">Network</th>
+                  <th className="py-1.5 px-2">Type</th>
+                  <th className="py-1.5 px-2">Account → Dest</th>
+                  <th className="py-1.5 px-2">Status</th>
+                  <th className="py-1.5 px-2 text-right">Hash</th>
                 </tr>
-              ) : (
-                summary!.recentJournal.map((j) => (
-                  <tr
-                    key={j.id}
-                    onClick={() => void inspectQuery(j.hash)}
-                    className="cursor-pointer hover:bg-slate-900/60"
-                  >
-                    <td className="py-1.5 px-2 text-slate-400">
-                      {new Date(j.timestamp).toLocaleString()}
-                    </td>
-                    <td className="py-1.5 px-2 text-cyan-300 uppercase">{j.network}</td>
-                    <td className="py-1.5 px-2 text-white">{j.txType}</td>
-                    <td className="py-1.5 px-2 text-slate-300">
-                      {shortenAddress(j.account, 6, 4)}
-                      {j.destination ? ` → ${shortenAddress(j.destination, 6, 4)}` : ''}
-                    </td>
-                    <td className="py-1.5 px-2 text-emerald-300">{j.status}</td>
-                    <td className="py-1.5 px-2 text-right text-slate-400">
-                      {shortenAddress(j.hash, 8, 6)}
+              </thead>
+              <tbody className="divide-y divide-slate-800/60">
+                {(summary?.recentJournal ?? []).length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="py-6 text-center text-slate-500">
+                      Transactions signed or received by your tracked wallets are automatically journaled here.
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+                ) : (
+                  summary!.recentJournal.map((j) => (
+                    <tr
+                      key={j.id}
+                      onClick={() => void inspectQuery(j.hash)}
+                      className="cursor-pointer hover:bg-slate-900/60"
+                    >
+                      <td className="py-1.5 px-2 text-slate-400">
+                        {new Date(j.timestamp).toLocaleString()}
+                      </td>
+                      <td className="py-1.5 px-2 text-cyan-300 uppercase">{j.network}</td>
+                      <td className="py-1.5 px-2 text-white">{j.txType}</td>
+                      <td className="py-1.5 px-2 text-slate-300">
+                        {shortenAddress(j.account, 6, 4)}
+                        {j.destination ? ` → ${shortenAddress(j.destination, 6, 4)}` : ''}
+                      </td>
+                      <td className="py-1.5 px-2 text-emerald-300">{j.status}</td>
+                      <td className="py-1.5 px-2 text-right text-slate-400">
+                        {shortenAddress(j.hash, 8, 6)}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -1,4 +1,5 @@
 import React, { lazy, Suspense, useEffect } from 'react';
+import { AgentMcpDrawer } from './components/AgentMcpDrawer';
 import { CommandPalette } from './components/CommandPalette';
 import { ConsensusCoreCanvas } from './components/ConsensusCoreCanvas';
 import { DeckErrorBoundary } from './components/DeckErrorBoundary';
@@ -107,6 +108,9 @@ export const App: React.FC = () => {
         }
       }),
       bridge.onConsensusPhase((p) => useCommandStore.getState().ingestConsensusPhase(p)),
+      bridge.onVaultStatusChanged((st) => useCommandStore.getState().applyVaultStatus(st)),
+      bridge.onMcpStatus((st) => useCommandStore.getState().ingestMcpStatus(st)),
+      bridge.onMcpRendererAction((action) => useCommandStore.getState().handleMcpRendererAction(action)),
     ];
 
     void bridge.getStreamStatus().then((st) => {
@@ -117,6 +121,7 @@ export const App: React.FC = () => {
     });
 
     void store.refreshVaultStatus();
+    void store.refreshMcpStatus();
     void store.refreshMarketPrice();
 
     // Defer heavier directory fetches slightly so first paint of Command Deck is instantaneous
@@ -154,6 +159,10 @@ export const App: React.FC = () => {
         e.preventDefault();
         const st = useCommandStore.getState();
         st.setCommandPaletteOpen(!st.commandPaletteOpen);
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'j') {
+        e.preventDefault();
+        const st = useCommandStore.getState();
+        st.setAgentDrawerOpen(!st.agentDrawerOpen);
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
         e.preventDefault();
         useCommandStore.getState().toggleSidebar();
@@ -178,6 +187,7 @@ export const App: React.FC = () => {
         const st = useCommandStore.getState();
         if (st.commandPaletteOpen) st.setCommandPaletteOpen(false);
         else if (st.pendingTxIntent) st.closeTxConfirmModal();
+        else if (st.agentDrawerOpen) st.setAgentDrawerOpen(false);
         else if (st.inspectorOpen) st.closeInspector();
       }
     };
@@ -231,6 +241,7 @@ export const App: React.FC = () => {
       </div>
 
       <InspectorDrawer />
+      <AgentMcpDrawer />
       <CommandPalette />
       <TxConfirmModal />
       <QuickStartModal />

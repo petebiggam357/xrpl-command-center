@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import QRCode from 'qrcode';
@@ -996,17 +997,87 @@ export function buildXrplTransactionFromIntent(intent: WalletTxIntent): {
 
 export class WalletVaultService {
   private unlockedSeeds: Map<string, string> | null = null;
+  private isUnlocked = false;
   private activePassphraseKey: Buffer | null = null;
   private activeSalt: Buffer | null = null;
   private autoLockTimer: NodeJS.Timeout | null = null;
+  private autoLockMinutes = Math.round(AUTO_LOCK_MS / 60_000);
   private autoLockMs = AUTO_LOCK_MS;
+  private autoLockAt: number | null = null;
+  private prefsLoaded = false;
+  private onLockListener: (() => void) | null = null;
   private trackedAddresses = new Set<string>();
 
+  private get prefsPath(): string {
+    return path.join(this.storageDir, 'vault-prefs.json');
+  }
+
+  public setOnLockListener(cb: (() => void) | null): void {
+    this.onLockListener = cb;
+  }
+
+  private notifyLockListener(): void {
+    if (!this.onLockListener) return;
+    try {
+      this.onLockListener();
+    } catch {
+      // ignore listener errors
+    }
+  }
+
+  private async ensurePrefsLoaded(): Promise<void> {
+    if (this.prefsLoaded) return;
+    this.prefsLoaded = true;
+    try {
+      const raw = await fs.readFile(this.prefsPath, 'utf8');
+      const parsed = JSON.parse(raw) as { autoLockMinutes?: number };
+      if (typeof parsed.autoLockMinutes === 'number' && Number.isFinite(parsed.autoLockMinutes)) {
+        const clamped = parsed.autoLockMinutes <= 0 ? 0 : Math.max(1, Math.min(240, Math.round(parsed.autoLockMinutes)));
+        this.autoLockMinutes = clamped;
+        this.autoLockMs = clamped * 60 * 1000;
+      }
+    } catch {
+      // default 15 minutes
+    }
+  }
+
+  public getAutoLockMinutes(): number {
+    return this.autoLockMinutes;
+  }
+
+  public getAutoLockAt(): number | null {
+    return this.autoLockAt;
+  }
+
   public setAutoLockMinutes(minutes: number): number {
-    const clamped = Math.max(1, Math.min(240, Math.round(Number(minutes) || 15)));
+    const raw = Math.round(Number(minutes));
+    const clamped = !Number.isFinite(raw) ? 15 : raw <= 0 ? 0 : Math.max(1, Math.min(240, raw));
+    this.autoLockMinutes = clamped;
     this.autoLockMs = clamped * 60 * 1000;
-    if (this.autoLockTimer) {
-      this.touchAutoLock();
+    this.prefsLoaded = true;
+
+    // Persist preference synchronously to avoid race with immediate process exit
+    try {
+      fsSync.mkdirSync(this.storageDir, { recursive: true });
+      fsSync.writeFileSync(
+        this.prefsPath,
+        JSON.stringify({ autoLockMinutes: clamped }, null, 2),
+        { encoding: 'utf8', mode: 0o600 }
+      );
+    } catch {
+      // non-fatal on restricted filesystems
+    }
+
+    if (this.isUnlocked || this.autoLockTimer || this.unlockedSeeds !== null || this.autoLockAt !== null) {
+      if (clamped === 0) {
+        if (this.autoLockTimer) {
+          clearTimeout(this.autoLockTimer);
+          this.autoLockTimer = null;
+        }
+        this.autoLockAt = null;
+      } else {
+        this.touchAutoLock();
+      }
     }
     return clamped;
   }
@@ -1033,7 +1104,15 @@ export class WalletVaultService {
   }
 
   private touchAutoLock(): void {
-    if (this.autoLockTimer) clearTimeout(this.autoLockTimer);
+    if (this.autoLockTimer) {
+      clearTimeout(this.autoLockTimer);
+      this.autoLockTimer = null;
+    }
+    if (this.autoLockMinutes <= 0 || this.autoLockMs <= 0) {
+      this.autoLockAt = null;
+      return;
+    }
+    this.autoLockAt = Date.now() + this.autoLockMs;
     this.autoLockTimer = setTimeout(() => {
       this.lock();
     }, this.autoLockMs);
@@ -1171,30 +1250,49 @@ export class WalletVaultService {
   }
 
   public async getStatus(): Promise<VaultStatus> {
+    await this.ensurePrefsLoaded();
     if (this.rustSidecar) {
       const st = await this.rustSidecar.getStatus();
       this.syncTrackedAddresses(st.accounts);
-      return st;
+      this.isUnlocked = Boolean(st.unlocked);
+      return {
+        ...st,
+        autoLockMinutes: this.autoLockMinutes,
+        autoLockAt: st.unlocked ? this.autoLockAt : null,
+      };
     }
     const disk = await this.loadDiskFile();
     this.syncTrackedAddresses(disk.accounts);
+    const unlocked = this.unlockedSeeds !== null;
+    this.isUnlocked = unlocked;
     return {
       initialized: disk.vaultInitialized,
-      unlocked: this.unlockedSeeds !== null,
+      unlocked,
       osKeychainAvailable: this.isOsKeychainAvailable(),
       backend: 'node-fallback',
       kdf: 'scrypt+aes-256-gcm',
+      autoLockMinutes: this.autoLockMinutes,
+      autoLockAt: unlocked ? this.autoLockAt : null,
       accounts: disk.accounts,
     };
   }
 
   public async setupVault(passphrase: string): Promise<{ ok: boolean; status?: VaultStatus; error?: string }> {
+    await this.ensurePrefsLoaded();
     if (this.rustSidecar) {
       try {
         const status = await this.rustSidecar.setupVault(passphrase);
         this.syncTrackedAddresses(status.accounts);
+        this.isUnlocked = Boolean(status.unlocked);
         this.touchAutoLock();
-        return { ok: true, status };
+        return {
+          ok: true,
+          status: {
+            ...status,
+            autoLockMinutes: this.autoLockMinutes,
+            autoLockAt: this.autoLockAt,
+          },
+        };
       } catch (err) {
         return { ok: false, error: err instanceof Error ? err.message : 'Rust vault setup failed' };
       }
@@ -1220,6 +1318,7 @@ export class WalletVaultService {
     });
 
     this.unlockedSeeds = seeds;
+    this.isUnlocked = true;
     this.activePassphraseKey = key;
     this.activeSalt = salt;
     this.touchAutoLock();
@@ -1228,11 +1327,20 @@ export class WalletVaultService {
   }
 
   public async unlock(passphrase: string): Promise<{ ok: boolean; status?: VaultStatus; error?: string }> {
+    await this.ensurePrefsLoaded();
     if (this.rustSidecar) {
       try {
         const status = await this.rustSidecar.unlock(passphrase);
+        this.isUnlocked = Boolean(status.unlocked);
         this.touchAutoLock();
-        return { ok: true, status };
+        return {
+          ok: true,
+          status: {
+            ...status,
+            autoLockMinutes: this.autoLockMinutes,
+            autoLockAt: this.autoLockAt,
+          },
+        };
       } catch (err) {
         return { ok: false, error: err instanceof Error ? err.message : 'Failed to unlock Rust vault' };
       }
@@ -1241,6 +1349,7 @@ export class WalletVaultService {
       const disk = await this.loadDiskFile();
       const { key, salt, seeds } = this.decryptSeeds(disk, passphrase);
       this.unlockedSeeds = seeds;
+      this.isUnlocked = true;
       this.activePassphraseKey = key;
       this.activeSalt = salt;
       this.touchAutoLock();
@@ -1255,9 +1364,8 @@ export class WalletVaultService {
       clearTimeout(this.autoLockTimer);
       this.autoLockTimer = null;
     }
-    if (this.rustSidecar && this.rustSidecar.isRunning()) {
-      void this.rustSidecar.lock().catch(() => undefined);
-    }
+    this.isUnlocked = false;
+    this.autoLockAt = null;
     if (this.unlockedSeeds) {
       this.unlockedSeeds.clear();
       this.unlockedSeeds = null;
@@ -1267,6 +1375,14 @@ export class WalletVaultService {
       this.activePassphraseKey = null;
     }
     this.activeSalt = null;
+    if (this.rustSidecar && this.rustSidecar.isRunning()) {
+      void this.rustSidecar
+        .lock()
+        .catch(() => undefined)
+        .finally(() => this.notifyLockListener());
+      return;
+    }
+    this.notifyLockListener();
   }
 
   private async persistUnlockedCustodial(accounts: WalletAccountPublic[]): Promise<void> {

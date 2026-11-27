@@ -8,6 +8,8 @@ import type {
   LedgerSnapshot,
   LiveTransaction,
   MarketPriceSnapshot,
+  McpRendererAction,
+  McpServerStatus,
   NavTab,
   NetworkId,
   NodeConnectionConfig,
@@ -31,7 +33,10 @@ import type {
   WatchlistEntry,
 } from '../shared/types';
 import { DEFAULT_ADDRESS_BOOK_CONTACTS } from '../shared/betaUtils';
+import { normalizeAutoLockMinutes } from '../shared/mcpAgentUtils';
+import { canonicalTokenKey, mergeTokenCollections } from '../shared/tokenDiscoveryUtils';
 import { evaluatePriceAlerts } from '../shared/v020Utils';
+import { decodeCurrencyCode, encodeCurrencyCode } from '../shared/xrplCodec';
 import { playAlertPing } from '../services/alertAudio';
 import { getXrplBridge } from '../services/xrplBridge';
 
@@ -40,6 +45,7 @@ export type { NavTab };
 const MAX_LEDGERS = 36;
 const MAX_TX_FEED = 180;
 const MAX_PULSES = 90;
+const MAX_LIVE_STREAM_TOKENS = 400;
 
 const WATCHLIST_STORAGE_KEY = 'xrpl-cc-watchlist-v1';
 const NODE_CONFIG_STORAGE_KEY = 'xrpl-cc-nodeops-v1';
@@ -53,6 +59,9 @@ const PORTFOLIO_HISTORY_KEY = 'xrpl-cc-portfolio-history-v1';
 const AUTOLOCK_MINUTES_KEY = 'xrpl-cc-autolock-min-v1';
 const WALLET_GROUPS_KEY = 'xrpl-cc-wallet-groups-v1';
 const SIDEBAR_COLLAPSED_KEY = 'xrpl-cc-sidebar-collapsed-v1';
+const PINNED_TOKENS_KEY = 'xrpl-cc-pinned-tokens-v1';
+
+let tokenSearchSeq = 0;
 
 function applyThemeToDom(theme: HudThemeId): void {
   if (typeof document !== 'undefined') {
@@ -102,12 +111,30 @@ function loadPortfolioHistory(): PortfolioSnapshotPoint[] {
 
 function loadAutoLockMinutes(): number {
   try {
-    const raw = Number(localStorage.getItem(AUTOLOCK_MINUTES_KEY));
-    if (Number.isFinite(raw) && raw >= 1 && raw <= 240) return raw;
+    const rawStr = localStorage.getItem(AUTOLOCK_MINUTES_KEY);
+    if (rawStr !== null) {
+      const raw = Number(rawStr);
+      if (Number.isFinite(raw)) return normalizeAutoLockMinutes(raw);
+    }
   } catch {
     // ignore
   }
   return 15;
+}
+
+function loadPinnedTokens(): TokenRecord[] {
+  try {
+    const raw = localStorage.getItem(PINNED_TOKENS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as TokenRecord[];
+      if (Array.isArray(parsed)) {
+        return parsed.filter((t) => t && t.currency && t.issuer).map((t) => ({ ...t, pinned: true }));
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return [];
 }
 
 function loadSavedEndpoints(): SavedEndpointProfile[] {
@@ -244,6 +271,13 @@ interface CommandState {
 
   // Tokens & Live Discovery
   tokens: TokenRecord[];
+  liveStreamTokens: TokenRecord[];
+  pinnedTokens: TokenRecord[];
+  tokenSearchResults: TokenRecord[];
+  tokenSearchLoading: boolean;
+  tokenSearchSource: string;
+  tokensHasMore: boolean;
+  tokensOffset: number;
   tokensLoading: boolean;
   tokensSource: string;
   selectedToken: TokenRecord | null;
@@ -313,6 +347,10 @@ interface CommandState {
     nonce: number;
   } | null;
 
+  // v0.3.0-beta: Agent & MCP Hub Slide-Over Drawer
+  agentDrawerOpen: boolean;
+  mcpStatus: McpServerStatus | null;
+
   // Actions
   setActiveTab: (tab: NavTab) => void;
   togglePaused: () => void;
@@ -328,12 +366,18 @@ interface CommandState {
   ingestConsensusPhase: (phase: ConsensusPhase) => void;
   refreshValidators: () => Promise<void>;
   refreshTokens: () => Promise<void>;
+  loadMoreTokens: () => Promise<void>;
+  searchLedgerTokens: (query: string) => Promise<void>;
+  clearTokenSearch: () => void;
+  pinToken: (token: TokenRecord) => void;
+  unpinToken: (tokenId: string) => void;
   selectToken: (token: TokenRecord | null) => Promise<void>;
   inspectQuery: (query: string) => Promise<void>;
   inspectLiveTransaction: (tx: LiveTransaction) => void;
   closeInspector: () => void;
 
   // Wallet Vault Actions
+  applyVaultStatus: (status: VaultStatus) => void;
   refreshVaultStatus: () => Promise<void>;
   selectWallet: (walletId: string | null) => Promise<void>;
   refreshWalletPortfolio: () => Promise<void>;
@@ -383,6 +427,12 @@ interface CommandState {
     tokenIssuer?: string;
   }) => void;
   clearWalletPrefill: () => void;
+
+  // v0.3.0-beta Actions
+  setAgentDrawerOpen: (open: boolean) => void;
+  ingestMcpStatus: (status: McpServerStatus) => void;
+  refreshMcpStatus: () => Promise<void>;
+  handleMcpRendererAction: (action: McpRendererAction) => void;
 }
 
 const initialCounts: Record<TxCategory, number> = {
@@ -428,7 +478,14 @@ export const useCommandStore = create<CommandState>((set, get) => ({
   validatorsLoading: false,
   validatorsSource: '',
 
-  tokens: [],
+  tokens: loadPinnedTokens(),
+  liveStreamTokens: [],
+  pinnedTokens: loadPinnedTokens(),
+  tokenSearchResults: [],
+  tokenSearchLoading: false,
+  tokenSearchSource: '',
+  tokensHasMore: false,
+  tokensOffset: 0,
   tokensLoading: false,
   tokensSource: '',
   selectedToken: null,
@@ -492,6 +549,9 @@ export const useCommandStore = create<CommandState>((set, get) => ({
   sidebarCollapsed: loadSidebarCollapsed(),
   walletPrefill: null,
 
+  agentDrawerOpen: false,
+  mcpStatus: null,
+
   setActiveTab: (tab) => set({ activeTab: tab }),
   togglePaused: () => set((s) => ({ paused: !s.paused })),
   toggleReducedMotion: () => set((s) => ({ reducedMotion: !s.reducedMotion })),
@@ -499,6 +559,7 @@ export const useCommandStore = create<CommandState>((set, get) => ({
 
   connectNetwork: async (networkId, customEndpoint) => {
     const bridge = getXrplBridge();
+    tokenSearchSeq += 1;
     set({
       ledgers: [],
       transactions: [],
@@ -508,6 +569,12 @@ export const useCommandStore = create<CommandState>((set, get) => ({
       txTimestamps10s: [],
       tpsEstimate: 0,
       totalProcessedTxs: 0,
+      liveStreamTokens: [],
+      tokenSearchResults: [],
+      tokenSearchSource: '',
+      tokenSearchLoading: false,
+      tokensHasMore: false,
+      tokensOffset: 0,
     });
     const status = await bridge.connectNetwork(networkId, customEndpoint);
     set({ streamStatus: status });
@@ -596,24 +663,51 @@ export const useCommandStore = create<CommandState>((set, get) => ({
       }
       const tps = Number((recentTs.length / 10).toFixed(1));
       const nextCounts = { ...s.txCategoryCounts };
-      let nextTokens = s.tokens;
-      let tokenSet: Set<string> | null = null;
+
+      // Capture ALL non-XRP issued tokens observed on the live stream (up to MAX_LIVE_STREAM_TOKENS)
+      let liveMap: Map<string, TokenRecord> | null = null;
+      let liveChanged = false;
 
       for (const tx of txs) {
         nextCounts[tx.category] = (nextCounts[tx.category] ?? 0) + 1;
-        if (tx.currency && tx.currency !== 'XRP' && tx.issuer && nextTokens.length < 240) {
-          if (!tokenSet) {
-            tokenSet = new Set(nextTokens.map((t) => `${t.currency}:${t.issuer}`));
+        const observed =
+          tx.observedTokens && tx.observedTokens.length > 0
+            ? tx.observedTokens
+            : tx.currency && tx.currency !== 'XRP' && tx.issuer
+              ? [
+                  {
+                    currency: tx.currency,
+                    currencyRaw: (() => {
+                      try {
+                        return encodeCurrencyCode(tx.currency!);
+                      } catch {
+                        return tx.currency!;
+                      }
+                    })(),
+                    issuer: tx.issuer,
+                  },
+                ]
+              : [];
+
+        for (const tok of observed) {
+          if (!liveMap) {
+            liveMap = new Map(s.liveStreamTokens.map((t) => [t.id, t]));
           }
-          const key = `${tx.currency}:${tx.issuer}`;
-          if (!tokenSet.has(key)) {
-            tokenSet.add(key);
-            if (nextTokens === s.tokens) nextTokens = [...s.tokens];
-            nextTokens.unshift({
+          const key = canonicalTokenKey(tok.currencyRaw, tok.issuer);
+          const existing = liveMap.get(key);
+          liveChanged = true;
+          if (existing) {
+            liveMap.set(key, {
+              ...existing,
+              lastSeenAt: now,
+              liveTxCount: (existing.liveTxCount ?? 1) + 1,
+            });
+          } else {
+            liveMap.set(key, {
               id: key,
-              currency: tx.currency,
-              currencyRaw: tx.currency,
-              issuer: tx.issuer,
+              currency: tok.currency,
+              currencyRaw: tok.currencyRaw,
+              issuer: tok.issuer,
               holders: 0,
               trustlines: 0,
               supply: 0,
@@ -622,9 +716,24 @@ export const useCommandStore = create<CommandState>((set, get) => ({
               priceUsd: 0,
               source: 'live-stream',
               lastSeenAt: now,
+              liveTxCount: 1,
             });
           }
         }
+      }
+
+      let nextLiveStreamTokens = s.liveStreamTokens;
+      let nextTokens = s.tokens;
+      if (liveChanged && liveMap) {
+        nextLiveStreamTokens = Array.from(liveMap.values())
+          .sort((a, b) => (b.lastSeenAt ?? 0) - (a.lastSeenAt ?? 0))
+          .slice(0, MAX_LIVE_STREAM_TOKENS);
+        nextTokens = mergeTokenCollections({
+          directory: s.tokens.filter((t) => t.source !== 'live-stream'),
+          liveStream: nextLiveStreamTokens,
+          pinned: s.pinnedTokens,
+          remoteHits: s.tokenSearchResults,
+        });
       }
 
       const nextAlerts =
@@ -636,6 +745,7 @@ export const useCommandStore = create<CommandState>((set, get) => ({
           tpsEstimate: tps,
           txCategoryCounts: nextCounts,
           totalProcessedTxs: s.totalProcessedTxs + txs.length,
+          liveStreamTokens: nextLiveStreamTokens,
           tokens: nextTokens,
           alerts: nextAlerts,
         };
@@ -649,6 +759,7 @@ export const useCommandStore = create<CommandState>((set, get) => ({
         tpsEstimate: tps,
         txCategoryCounts: nextCounts,
         totalProcessedTxs: s.totalProcessedTxs + txs.length,
+        liveStreamTokens: nextLiveStreamTokens,
         tokens: nextTokens,
         alerts: nextAlerts,
       };
@@ -702,16 +813,133 @@ export const useCommandStore = create<CommandState>((set, get) => ({
     const networkId = get().streamStatus.networkId;
     set({ tokensLoading: true });
     try {
-      const res = await getXrplBridge().fetchTokens(networkId);
-      set({
-        tokens: res.tokens,
+      const res = await getXrplBridge().fetchTokens(networkId, { limit: 200, offset: 0, sortBy: 'trustlines' });
+      set((s) => ({
+        tokens: mergeTokenCollections({
+          directory: res.tokens,
+          liveStream: s.liveStreamTokens,
+          pinned: s.pinnedTokens,
+          remoteHits: s.tokenSearchResults,
+        }),
+        tokensHasMore: Boolean(res.hasMore),
+        tokensOffset: res.tokens.length,
         tokensSource: res.source,
         tokensLoading: false,
-      });
+      }));
     } catch {
       set({ tokensLoading: false });
     }
   },
+
+  loadMoreTokens: async () => {
+    const { streamStatus, tokensOffset, tokensLoading, tokensHasMore } = get();
+    if (tokensLoading || !tokensHasMore) return;
+    set({ tokensLoading: true });
+    try {
+      const res = await getXrplBridge().fetchTokens(streamStatus.networkId, {
+        limit: 200,
+        offset: tokensOffset,
+        sortBy: 'trustlines',
+      });
+      set((s) => ({
+        tokens: mergeTokenCollections({
+          directory: [...s.tokens.filter((t) => t.source !== 'live-stream'), ...res.tokens],
+          liveStream: s.liveStreamTokens,
+          pinned: s.pinnedTokens,
+          remoteHits: s.tokenSearchResults,
+        }),
+        tokensHasMore: Boolean(res.hasMore),
+        tokensOffset: s.tokensOffset + res.tokens.length,
+        tokensLoading: false,
+      }));
+    } catch {
+      set({ tokensLoading: false });
+    }
+  },
+
+  searchLedgerTokens: async (rawQuery) => {
+    const clean = rawQuery.trim();
+    const reqSeq = ++tokenSearchSeq;
+    if (!clean) {
+      set({ tokenSearchResults: [], tokenSearchLoading: false, tokenSearchSource: '' });
+      return;
+    }
+    const networkId = get().streamStatus.networkId;
+    set({ tokenSearchLoading: true });
+    try {
+      const res = await getXrplBridge().searchTokens(clean, networkId);
+      if (reqSeq !== tokenSearchSeq) return;
+      set((s) => ({
+        tokenSearchResults: res.tokens,
+        tokenSearchSource: res.source,
+        tokenSearchLoading: false,
+        tokens: mergeTokenCollections({
+          directory: s.tokens.filter((t) => t.source !== 'live-stream'),
+          liveStream: s.liveStreamTokens,
+          pinned: s.pinnedTokens,
+          remoteHits: res.tokens,
+        }),
+      }));
+    } catch {
+      if (reqSeq !== tokenSearchSeq) return;
+      set({ tokenSearchLoading: false });
+    }
+  },
+
+  clearTokenSearch: () => {
+    tokenSearchSeq += 1;
+    set({ tokenSearchResults: [], tokenSearchSource: '', tokenSearchLoading: false });
+  },
+
+  pinToken: (token) =>
+    set((s) => {
+      const currencyRaw = (() => {
+        try {
+          return encodeCurrencyCode(token.currencyRaw || token.currency);
+        } catch {
+          return token.currencyRaw || token.currency;
+        }
+      })();
+      const key = canonicalTokenKey(currencyRaw, token.issuer);
+      const normalized: TokenRecord = {
+        ...token,
+        id: key,
+        currency: decodeCurrencyCode(currencyRaw),
+        currencyRaw,
+        pinned: true,
+        source: token.source === 'curated' ? 'pinned' : token.source,
+      };
+      const filtered = s.pinnedTokens.filter((t) => canonicalTokenKey(t.currencyRaw || t.currency, t.issuer) !== key);
+      const nextPinned = [normalized, ...filtered].slice(0, 60);
+      try {
+        localStorage.setItem(PINNED_TOKENS_KEY, JSON.stringify(nextPinned));
+      } catch {
+        // ignore
+      }
+      return {
+        pinnedTokens: nextPinned,
+        tokens: mergeTokenCollections({
+          directory: s.tokens.filter((t) => t.source !== 'live-stream'),
+          liveStream: s.liveStreamTokens,
+          pinned: nextPinned,
+          remoteHits: s.tokenSearchResults,
+        }),
+      };
+    }),
+
+  unpinToken: (tokenId) =>
+    set((s) => {
+      const nextPinned = s.pinnedTokens.filter((t) => t.id !== tokenId);
+      try {
+        localStorage.setItem(PINNED_TOKENS_KEY, JSON.stringify(nextPinned));
+      } catch {
+        // ignore
+      }
+      return {
+        pinnedTokens: nextPinned,
+        tokens: s.tokens.map((t) => (t.id === tokenId ? { ...t, pinned: false } : t)),
+      };
+    }),
 
   selectToken: async (token) => {
     set({ selectedToken: token, tokenOnLedgerReport: null, tokenReportLoading: Boolean(token) });
@@ -771,22 +999,63 @@ export const useCommandStore = create<CommandState>((set, get) => ({
 
   closeInspector: () => set({ inspectorOpen: false }),
 
-  // Wallet Vault Actions
-  refreshVaultStatus: async () => {
-    const status = await getXrplBridge().walletGetStatus();
+  // Wallet Vault Actions — strictly hide & clear cached wallet data while Vault is initialized & locked
+  applyVaultStatus: (status) => {
+    const syncedAutoLock =
+      typeof status.autoLockMinutes === 'number'
+        ? normalizeAutoLockMinutes(status.autoLockMinutes)
+        : get().autoLockMinutes;
+
+    if (status.initialized && !status.unlocked) {
+      set({
+        vaultStatus: {
+          ...status,
+          accounts: [],
+          autoLockAt: null,
+        },
+        autoLockMinutes: syncedAutoLock,
+        selectedWalletId: null,
+        walletPortfolio: null,
+        walletPortfolioLoading: false,
+        walletBalancesMap: {},
+        pendingTxWalletId: null,
+        pendingTxIntent: null,
+        pendingTxPreview: null,
+      });
+      return;
+    }
+
     const curSelected = get().selectedWalletId;
     const validSelected =
       curSelected && status.accounts.some((a) => a.id === curSelected)
         ? curSelected
         : status.accounts[0]?.id ?? null;
 
-    set({ vaultStatus: status, selectedWalletId: validSelected });
-    if (validSelected && (!get().walletPortfolio || get().walletPortfolio?.address !== status.accounts.find((a) => a.id === validSelected)?.address)) {
+    set({
+      vaultStatus: status,
+      autoLockMinutes: syncedAutoLock,
+      selectedWalletId: validSelected,
+    });
+    if (
+      validSelected &&
+      (!get().walletPortfolio ||
+        get().walletPortfolio?.address !== status.accounts.find((a) => a.id === validSelected)?.address)
+    ) {
       void get().refreshWalletPortfolio();
     }
   },
 
+  refreshVaultStatus: async () => {
+    const status = await getXrplBridge().walletGetStatus();
+    get().applyVaultStatus(status);
+  },
+
   selectWallet: async (walletId) => {
+    const { vaultStatus } = get();
+    if (vaultStatus.initialized && !vaultStatus.unlocked) {
+      set({ selectedWalletId: null, walletPortfolio: null });
+      return;
+    }
     set({ selectedWalletId: walletId, walletPortfolio: null });
     if (walletId) {
       await get().refreshWalletPortfolio();
@@ -795,6 +1064,10 @@ export const useCommandStore = create<CommandState>((set, get) => ({
 
   refreshWalletPortfolio: async () => {
     const { selectedWalletId, vaultStatus } = get();
+    if (vaultStatus.initialized && !vaultStatus.unlocked) {
+      set({ walletPortfolio: null, walletPortfolioLoading: false, walletBalancesMap: {} });
+      return;
+    }
     const acct = vaultStatus.accounts.find((a) => a.id === selectedWalletId);
     if (!acct) {
       set({ walletPortfolio: null, walletPortfolioLoading: false });
@@ -803,7 +1076,12 @@ export const useCommandStore = create<CommandState>((set, get) => ({
     set({ walletPortfolioLoading: true });
     try {
       const snap = await getXrplBridge().walletFetchPortfolio(acct.address);
-      if (get().selectedWalletId === acct.id) {
+      const after = get();
+      if (after.vaultStatus.initialized && !after.vaultStatus.unlocked) {
+        set({ walletPortfolio: null, walletPortfolioLoading: false, walletBalancesMap: {} });
+        return;
+      }
+      if (after.selectedWalletId === acct.id) {
         set((s) => ({
           walletPortfolio: snap,
           walletPortfolioLoading: false,
@@ -1017,7 +1295,12 @@ export const useCommandStore = create<CommandState>((set, get) => ({
   },
 
   refreshAllWalletBalances: async () => {
-    const accounts = get().vaultStatus.accounts;
+    const { vaultStatus } = get();
+    if (vaultStatus.initialized && !vaultStatus.unlocked) {
+      set({ walletBalancesMap: {} });
+      return;
+    }
+    const accounts = vaultStatus.accounts;
     if (accounts.length === 0) return;
     const bridge = getXrplBridge();
     const updates: Record<string, number> = {};
@@ -1036,6 +1319,10 @@ export const useCommandStore = create<CommandState>((set, get) => ({
         }
       })
     );
+    if (get().vaultStatus.initialized && !get().vaultStatus.unlocked) {
+      set({ walletBalancesMap: {} });
+      return;
+    }
     set((s) => {
       const nextMap = { ...s.walletBalancesMap, ...updates };
       const totalXrp = Object.values(nextMap).reduce((sum, v) => sum + (Number.isFinite(v) ? v : 0), 0);
@@ -1136,14 +1423,22 @@ export const useCommandStore = create<CommandState>((set, get) => ({
     }),
 
   setAutoLockMinutes: async (minutes) => {
-    const res = await getXrplBridge().walletSetAutoLockMinutes(minutes);
-    const applied = res.minutes || minutes;
+    const normalized = normalizeAutoLockMinutes(minutes);
+    const res = await getXrplBridge().walletSetAutoLockMinutes(normalized);
+    const applied = typeof res.minutes === 'number' ? normalizeAutoLockMinutes(res.minutes) : normalized;
     try {
       localStorage.setItem(AUTOLOCK_MINUTES_KEY, String(applied));
     } catch {
       // ignore
     }
-    set({ autoLockMinutes: applied });
+    set((s) => ({
+      autoLockMinutes: applied,
+      vaultStatus: {
+        ...s.vaultStatus,
+        autoLockMinutes: applied,
+        autoLockAt: res.autoLockAt !== undefined ? res.autoLockAt : s.vaultStatus.autoLockAt,
+      },
+    }));
   },
 
   setWalletGroup: (walletId, group) =>
@@ -1176,4 +1471,113 @@ export const useCommandStore = create<CommandState>((set, get) => ({
     }),
 
   clearWalletPrefill: () => set({ walletPrefill: null }),
+
+  // v0.3.0-beta: Agent & MCP Hub Slide-Over Drawer
+  setAgentDrawerOpen: (open) => set({ agentDrawerOpen: open }),
+  ingestMcpStatus: (status) => set({ mcpStatus: status }),
+  refreshMcpStatus: async () => {
+    try {
+      const st = await getXrplBridge().mcpGetStatus();
+      set({ mcpStatus: st });
+    } catch {
+      // ignore
+    }
+  },
+  handleMcpRendererAction: (action) => {
+    const st = get();
+    if (action.type === 'navigate-tab') {
+      const validTabs = new Set<NavTab>([
+        'command',
+        'globe',
+        'validators',
+        'tokens',
+        'launcher',
+        'nftstudio',
+        'vaults',
+        'wallets',
+        'primitives',
+        'rpc',
+        'nodeops',
+        'analytics',
+        'education',
+      ]);
+      if (validTabs.has(action.tab as NavTab)) {
+        set({ activeTab: action.tab as NavTab });
+      }
+      return;
+    }
+
+    if (action.type === 'focus-token') {
+      const key = canonicalTokenKey(action.currencyRaw, action.issuer);
+      const existing = st.tokens.find((t) => canonicalTokenKey(t.currencyRaw || t.currency, t.issuer) === key);
+      const token: TokenRecord = existing ?? {
+        id: key,
+        currency: decodeCurrencyCode(action.currencyRaw),
+        currencyRaw: action.currencyRaw,
+        issuer: action.issuer,
+        holders: 0,
+        trustlines: 0,
+        supply: 0,
+        volume24hUsd: 0,
+        marketcapUsd: 0,
+        priceUsd: 0,
+        source: 'on-ledger',
+        lastSeenAt: Date.now(),
+      };
+      st.pinToken(token);
+      set({ activeTab: 'tokens' });
+      void get().selectToken(token);
+      return;
+    }
+
+    if (action.type === 'add-price-alert') {
+      st.addPriceAlert(action.symbol, action.direction, action.targetUsd);
+      return;
+    }
+
+    if (action.type === 'add-watchlist') {
+      st.addWatchlistEntry({
+        label: action.label,
+        type: action.targetType,
+        target: action.target,
+        notifyOs: true,
+      });
+      return;
+    }
+
+    if (action.type === 'draft-tx') {
+      // Human-in-the-Loop Gate: NEVER sign autonomously; open native TxConfirmModal for user approval
+      if (!st.vaultStatus.unlocked) return;
+      const acct =
+        st.vaultStatus.accounts.find((a) => a.id === st.selectedWalletId) ??
+        st.vaultStatus.accounts.find((a) => a.kind === 'custodial') ??
+        st.vaultStatus.accounts[0];
+      if (!acct) return;
+
+      if (action.kind === 'Payment' && action.destination && action.amount) {
+        const cur = (action.currency || 'XRP').trim();
+        const asset =
+          cur.toUpperCase() === 'XRP'
+            ? { currency: 'XRP', value: action.amount }
+            : { currency: cur, issuer: action.issuer, value: action.amount };
+        void st.openTxConfirmModal(acct.id, {
+          kind: 'Payment',
+          account: acct.address,
+          destination: action.destination,
+          asset,
+          destinationTag: action.destinationTag,
+          memoText: action.memoText,
+        });
+      } else if (action.kind === 'TrustSet' && action.currency && action.issuer) {
+        void st.openTxConfirmModal(acct.id, {
+          kind: 'TrustSet',
+          account: acct.address,
+          currency: action.currency,
+          issuer: action.issuer,
+          limit: action.amount || '1000000',
+          allowRippling: false,
+        });
+      }
+    }
+  },
 }));

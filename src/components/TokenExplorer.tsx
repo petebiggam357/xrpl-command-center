@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   ArrowLeftRight,
@@ -6,24 +6,47 @@ import {
   Coins,
   Droplets,
   Lock,
+  Plus,
+  Radio,
   RefreshCw,
   Search,
   ShieldAlert,
   ShieldCheck,
+  Star,
   Trash2,
 } from 'lucide-react';
+import { canonicalTokenKey, parseTokenQueryInput } from '../shared/tokenDiscoveryUtils';
+import type { TokenRecord } from '../shared/types';
 import { computeClobVsAmmSpread } from '../shared/v023Utils';
 import { simulateAmmLpYield } from '../shared/v024Utils';
-import { formatCompactNumber, shortenAddress } from '../shared/xrplCodec';
+import {
+  decodeCurrencyCode,
+  encodeCurrencyCode,
+  formatCompactNumber,
+  shortenAddress,
+} from '../shared/xrplCodec';
 import { useCommandStore } from '../store/useCommandStore';
 import { DexChartPanel } from './DexChartPanel';
 import { DexDepthCanvas } from './DexDepthCanvas';
 
+type TokenViewMode = 'all' | 'live' | 'pinned';
+
 export const TokenExplorer: React.FC = () => {
   const tokens = useCommandStore((s) => s.tokens);
+  const liveStreamTokens = useCommandStore((s) => s.liveStreamTokens);
+  const pinnedTokens = useCommandStore((s) => s.pinnedTokens);
+  const tokenSearchResults = useCommandStore((s) => s.tokenSearchResults);
+  const tokenSearchLoading = useCommandStore((s) => s.tokenSearchLoading);
+  const tokenSearchSource = useCommandStore((s) => s.tokenSearchSource);
+  const tokensHasMore = useCommandStore((s) => s.tokensHasMore);
   const tokensLoading = useCommandStore((s) => s.tokensLoading);
   const tokensSource = useCommandStore((s) => s.tokensSource);
   const refreshTokens = useCommandStore((s) => s.refreshTokens);
+  const loadMoreTokens = useCommandStore((s) => s.loadMoreTokens);
+  const searchLedgerTokens = useCommandStore((s) => s.searchLedgerTokens);
+  const clearTokenSearch = useCommandStore((s) => s.clearTokenSearch);
+  const pinToken = useCommandStore((s) => s.pinToken);
+  const unpinToken = useCommandStore((s) => s.unpinToken);
   const selectedToken = useCommandStore((s) => s.selectedToken);
   const tokenOnLedgerReport = useCommandStore((s) => s.tokenOnLedgerReport);
   const tokenReportLoading = useCommandStore((s) => s.tokenReportLoading);
@@ -36,15 +59,35 @@ export const TokenExplorer: React.FC = () => {
   const removePriceAlert = useCommandStore((s) => s.removePriceAlert);
 
   const [query, setQuery] = useState('');
-  const [sortBy, setSortBy] = useState<'trustlines' | 'volume24hUsd' | 'holders'>('trustlines');
+  const [viewMode, setViewMode] = useState<TokenViewMode>('all');
+  const [sortBy, setSortBy] = useState<'trustlines' | 'volume24hUsd' | 'holders' | 'recent'>('trustlines');
   const [alertDir, setAlertDir] = useState<'above' | 'below'>('above');
   const [alertPriceInput, setAlertPriceInput] = useState('');
+
+  // Custom On-Ledger Token Inspect & Pin form
+  const [customBarOpen, setCustomBarOpen] = useState(false);
+  const [customCur, setCustomCur] = useState('');
+  const [customIssuer, setCustomIssuer] = useState('');
+  const [customError, setCustomError] = useState<string | null>(null);
 
   // Track 2: XLS-30 AMM Impermanent Loss & LP Yield Simulator state
   const [simDepositXrp, setSimDepositXrp] = useState(2500);
   const [simPriceChangePct, setSimPriceChangePct] = useState(50);
   const [simDailyVolXrp, setSimDailyVolXrp] = useState(120_000);
   const [simHoldingDays, setSimHoldingDays] = useState(90);
+
+  // Debounced full-ledger remote search across 100,000+ XRPLMeta tokens + on-ledger RPC
+  useEffect(() => {
+    const clean = query.trim();
+    if (clean.length < 2) {
+      clearTokenSearch();
+      return;
+    }
+    const timer = setTimeout(() => {
+      void searchLedgerTokens(clean);
+    }, 420);
+    return () => clearTimeout(timer);
+  }, [query, searchLedgerTokens, clearTokenSearch]);
 
   const spreadReport = useMemo(
     () => (tokenOnLedgerReport ? computeClobVsAmmSpread(tokenOnLedgerReport) : null),
@@ -71,21 +114,111 @@ export const TokenExplorer: React.FC = () => {
     simHoldingDays,
   ]);
 
+  const pinnedKeySet = useMemo(
+    () => new Set(pinnedTokens.map((t) => canonicalTokenKey(t.currencyRaw || t.currency, t.issuer))),
+    [pinnedTokens]
+  );
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const list = tokens.filter((t) => {
+    const parsedQuery = parseTokenQueryInput(query);
+    const baseList =
+      viewMode === 'live'
+        ? liveStreamTokens
+        : viewMode === 'pinned'
+          ? pinnedTokens
+          : tokens;
+
+    const list = baseList.filter((t) => {
       if (!q) return true;
+      if (parsedQuery.kind === 'pair') {
+        const issuerMatches = t.issuer.toLowerCase() === parsedQuery.issuer.toLowerCase();
+        const curMatches =
+          t.currencyRaw.toLowerCase() === parsedQuery.currencyRaw.toLowerCase() ||
+          t.currency.toLowerCase() === parsedQuery.currency.toLowerCase();
+        if (issuerMatches && curMatches) return true;
+      }
+      const pairStr = `${t.currency}:${t.issuer}`.toLowerCase();
       return (
         t.currency.toLowerCase().includes(q) ||
+        t.currencyRaw.toLowerCase().includes(q) ||
         (t.name ?? '').toLowerCase().includes(q) ||
         t.issuer.toLowerCase().includes(q) ||
-        (t.domain ?? '').toLowerCase().includes(q)
+        (t.domain ?? '').toLowerCase().includes(q) ||
+        pairStr.includes(q)
       );
     });
-    return [...list].sort((a, b) => (b[sortBy] ?? 0) - (a[sortBy] ?? 0));
-  }, [tokens, query, sortBy]);
+
+    return [...list].sort((a, b) => {
+      if (q) {
+        const aExact = a.currency.toLowerCase() === q ? 1 : 0;
+        const bExact = b.currency.toLowerCase() === q ? 1 : 0;
+        if (aExact !== bExact) return bExact - aExact;
+      }
+      if (viewMode === 'live' || sortBy === 'recent') {
+        const dt = (b.lastSeenAt ?? 0) - (a.lastSeenAt ?? 0);
+        if (dt !== 0) return dt;
+        return (b.liveTxCount ?? 0) - (a.liveTxCount ?? 0);
+      }
+      const metricDiff = (b[sortBy] ?? 0) - (a[sortBy] ?? 0);
+      if (metricDiff !== 0) return metricDiff;
+      return (b.supply ?? 0) - (a.supply ?? 0);
+    });
+  }, [tokens, liveStreamTokens, pinnedTokens, viewMode, query, sortBy]);
 
   const topTiles = filtered.slice(0, 8);
+
+  const handleInspectCustomToken = (e: React.FormEvent) => {
+    e.preventDefault();
+    setCustomError(null);
+    const cur = customCur.trim();
+    const iss = customIssuer.trim();
+    if (!cur || cur.toUpperCase() === 'XRP') {
+      setCustomError('Enter a non-XRP currency symbol (e.g. RIP, RLUSD) or 40-char hex.');
+      return;
+    }
+    if (!/^r[1-9A-HJ-NP-Za-km-z]{24,34}$/.test(iss)) {
+      setCustomError('Enter a valid XRPL classic issuer r-address.');
+      return;
+    }
+    let currencyRaw: string;
+    try {
+      currencyRaw = encodeCurrencyCode(cur);
+    } catch {
+      setCustomError('Unsupported currency code format (max 20 ASCII chars or 40-char hex).');
+      return;
+    }
+    const token: TokenRecord = {
+      id: canonicalTokenKey(currencyRaw, iss),
+      currency: decodeCurrencyCode(currencyRaw),
+      currencyRaw,
+      issuer: iss,
+      holders: 0,
+      trustlines: 0,
+      supply: 0,
+      volume24hUsd: 0,
+      marketcapUsd: 0,
+      priceUsd: 0,
+      source: 'pinned',
+      pinned: true,
+      lastSeenAt: Date.now(),
+    };
+    pinToken(token);
+    void selectToken(token);
+    setCustomCur('');
+    setCustomIssuer('');
+    setCustomBarOpen(false);
+  };
+
+  const togglePin = (e: React.MouseEvent, t: TokenRecord) => {
+    e.stopPropagation();
+    const key = canonicalTokenKey(t.currencyRaw || t.currency, t.issuer);
+    if (pinnedKeySet.has(key)) {
+      unpinToken(key);
+    } else {
+      pinToken(t);
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -95,15 +228,33 @@ export const TokenExplorer: React.FC = () => {
           <div className="flex items-center gap-2">
             <Coins className="w-4 h-4 text-emerald-400" />
             <h2 className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan-300">
-              XRPL Token Universe — Top Trustlines &amp; Live Discovered Assets
+              XRPL Token Universe — Full Ledger Search, Live Stream &amp; Pinned Assets
             </h2>
             {tokensSource && (
               <span className="px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-[10px] font-mono text-slate-400">
-                {tokensSource}
+                {tokensSource} • {tokens.length} loaded
+              </span>
+            )}
+            {liveStreamTokens.length > 0 && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-500/15 border border-emerald-400/35 text-[10px] font-mono text-emerald-300">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                {liveStreamTokens.length} streaming live
               </span>
             )}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setCustomBarOpen((v) => !v)}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-mono transition-colors ${
+                customBarOpen
+                  ? 'bg-cyan-500/20 border-cyan-400 text-cyan-200'
+                  : 'bg-slate-950 border-slate-700 hover:border-cyan-400/60 text-slate-200'
+              }`}
+            >
+              <Plus className="w-3.5 h-3.5 text-cyan-400" />
+              Add / Pin Custom Token
+            </button>
             <button
               type="button"
               onClick={() =>
@@ -129,6 +280,39 @@ export const TokenExplorer: React.FC = () => {
             </button>
           </div>
         </div>
+
+        {/* Inline Custom On-Ledger Token Inspect & Pin Form */}
+        {customBarOpen && (
+          <form
+            onSubmit={handleInspectCustomToken}
+            className="mb-3 p-3 rounded-xl bg-slate-950/90 border border-cyan-500/35 flex flex-wrap items-center gap-2 text-xs font-mono"
+          >
+            <span className="text-[10px] uppercase text-cyan-300 shrink-0">Inspect &amp; Pin Any On-Ledger Token:</span>
+            <input
+              type="text"
+              value={customCur}
+              onChange={(e) => setCustomCur(e.target.value)}
+              placeholder="Currency (e.g. RIP, RLUSD)"
+              className="w-40 rounded-lg bg-slate-900 border border-slate-700 px-2.5 py-1 text-xs text-white focus:outline-none focus:border-cyan-400"
+            />
+            <input
+              type="text"
+              value={customIssuer}
+              onChange={(e) => setCustomIssuer(e.target.value)}
+              placeholder="Issuer classic address (r…)"
+              className="flex-1 min-w-[230px] rounded-lg bg-slate-900 border border-slate-700 px-2.5 py-1 text-xs text-white focus:outline-none focus:border-cyan-400"
+            />
+            <button
+              type="submit"
+              className="px-3 py-1 rounded-lg bg-cyan-500/20 border border-cyan-400/50 text-cyan-200 hover:bg-cyan-500/30"
+            >
+              Inspect &amp; Pin
+            </button>
+            {customError && (
+              <div className="w-full text-[11px] text-rose-300 mt-1">{customError}</div>
+            )}
+          </form>
+        )}
 
         {/* Live XRP Price Target Alerts Bar (v0.2.0-beta) */}
         <div className="mb-3 p-2.5 rounded-xl bg-slate-950/80 border border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
@@ -222,15 +406,19 @@ export const TokenExplorer: React.FC = () => {
               >
                 <div className="flex items-center justify-between gap-1">
                   <span className="font-mono text-xs font-bold text-white truncate">{t.currency}</span>
-                  {t.source === 'live-stream' && (
-                    <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" title="Discovered live on stream" />
+                  {(t.source === 'live-stream' || (t.liveTxCount ?? 0) > 0) && (
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" title="Observed live on stream" />
                   )}
                 </div>
                 <div className="text-[10px] text-slate-400 truncate mt-0.5">
                   {t.domain ?? t.name ?? shortenAddress(t.issuer, 5, 4)}
                 </div>
                 <div className="mt-2 font-mono text-[10px] text-cyan-200 tabular-nums">
-                  {t.trustlines > 0 ? `${formatCompactNumber(t.trustlines)} TL` : 'On-Ledger'}
+                  {t.trustlines > 0
+                    ? `${formatCompactNumber(t.trustlines)} TL`
+                    : t.liveTxCount
+                      ? `${t.liveTxCount} live tx`
+                      : 'On-Ledger'}
                 </div>
               </button>
             );
@@ -250,17 +438,86 @@ export const TokenExplorer: React.FC = () => {
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
         {/* Directory Table */}
         <div className="xl:col-span-7 hud-panel rounded-xl p-4 flex flex-col">
-          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-            <div className="relative flex-1 min-w-[200px]">
+          {/* Discovery View Tabs */}
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-2.5">
+            <div className="flex items-center gap-1.5 font-mono text-[11px]">
+              <button
+                type="button"
+                onClick={() => setViewMode('all')}
+                className={`px-2.5 py-1 rounded-lg border transition-colors ${
+                  viewMode === 'all'
+                    ? 'bg-cyan-500/20 border-cyan-400/60 text-cyan-200 font-semibold'
+                    : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
+                }`}
+              >
+                All Ledger ({tokens.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('live')}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border transition-colors ${
+                  viewMode === 'live'
+                    ? 'bg-emerald-500/20 border-emerald-400/60 text-emerald-200 font-semibold'
+                    : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
+                }`}
+              >
+                <Radio className="w-3 h-3 text-emerald-400" />
+                Live on Stream ({liveStreamTokens.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('pinned')}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border transition-colors ${
+                  viewMode === 'pinned'
+                    ? 'bg-amber-500/20 border-amber-400/60 text-amber-200 font-semibold'
+                    : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
+                }`}
+              >
+                <Star className="w-3 h-3 text-amber-400" />
+                Pinned ({pinnedTokens.length})
+              </button>
+            </div>
+
+            {tokenSearchLoading ? (
+              <span className="inline-flex items-center gap-1 text-[10px] font-mono text-cyan-300">
+                <RefreshCw className="w-3 h-3 animate-spin" />
+                Searching full 100k+ ledger registry…
+              </span>
+            ) : (
+              query.trim().length >= 2 &&
+              tokenSearchSource && (
+                <span className="text-[10px] font-mono text-emerald-300/90">
+                  +{tokenSearchResults.length} matches via {tokenSearchSource}
+                </span>
+              )
+            )}
+          </div>
+
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (query.trim()) void searchLedgerTokens(query.trim());
+            }}
+            className="flex flex-wrap items-center justify-between gap-2 mb-3"
+          >
+            <div className="relative flex-1 min-w-[210px]">
               <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-2" />
               <input
                 type="text"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search currency (RLUSD, SOLO, USD), domain, or issuer…"
+                placeholder="Search ANY ledger token (RIP, RLUSD), rIssuer, or RIP:rIssuer…"
                 className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-xs text-white focus:outline-none focus:border-cyan-400"
               />
             </div>
+
+            <button
+              type="submit"
+              disabled={tokenSearchLoading || !query.trim()}
+              className="px-2.5 py-1.5 rounded-lg bg-cyan-500/20 border border-cyan-400/50 text-xs font-mono text-cyan-200 hover:bg-cyan-500/30 disabled:opacity-40"
+            >
+              Search Ledger
+            </button>
 
             <select
               aria-label="Sort tokens"
@@ -271,65 +528,116 @@ export const TokenExplorer: React.FC = () => {
               <option value="trustlines">Sort: Trustlines</option>
               <option value="holders">Sort: Holders</option>
               <option value="volume24hUsd">Sort: 24h Volume</option>
+              <option value="recent">Sort: Live Activity</option>
             </select>
-          </div>
+          </form>
 
           <div className="overflow-auto max-h-[520px]">
             <table className="w-full text-left border-collapse">
               <thead className="sticky top-0 bg-panel z-10 text-[10px] font-mono uppercase text-slate-400 border-b border-slate-800">
                 <tr>
+                  <th className="py-2 px-1.5 w-7" aria-label="Pin" />
                   <th className="py-2 px-2.5">Asset</th>
                   <th className="py-2 px-2.5">Issuer / Domain</th>
                   <th className="py-2 px-2.5 text-right">Trustlines</th>
                   <th className="py-2 px-2.5 text-right">Holders</th>
-                  <th className="py-2 px-2.5 text-right">Supply</th>
+                  <th className="py-2 px-2.5 text-right">Supply / Live</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60 text-xs">
-                {filtered.map((t) => {
-                  const active = selectedToken?.id === t.id;
-                  return (
-                    <tr
-                      key={t.id}
-                      onClick={() => void selectToken(t)}
-                      className={`cursor-pointer transition-colors ${
-                        active ? 'bg-cyan-500/15' : 'hover:bg-slate-900/70'
-                      }`}
-                    >
-                      <td className="py-2 px-2.5">
-                        <div className="font-mono font-bold text-white flex items-center gap-1.5">
-                          <span>{t.currency}</span>
-                          {t.source === 'live-stream' && (
-                            <span className="px-1 py-0.2 rounded bg-emerald-500/20 text-[9px] text-emerald-300">
-                              LIVE
-                            </span>
-                          )}
-                        </div>
-                        {t.name && <div className="text-[10px] text-slate-500 truncate max-w-[140px]">{t.name}</div>}
-                      </td>
-                      <td className="py-2 px-2.5">
-                        <div className="text-slate-200 text-[11px] truncate max-w-[160px]">
-                          {t.domain ?? '—'}
-                        </div>
-                        <div className="font-mono text-[10px] text-slate-500">
-                          {shortenAddress(t.issuer, 8, 5)}
-                        </div>
-                      </td>
-                      <td className="py-2 px-2.5 text-right font-mono tabular-nums text-cyan-300">
-                        {t.trustlines > 0 ? formatCompactNumber(t.trustlines) : '—'}
-                      </td>
-                      <td className="py-2 px-2.5 text-right font-mono tabular-nums text-slate-300">
-                        {t.holders > 0 ? formatCompactNumber(t.holders) : '—'}
-                      </td>
-                      <td className="py-2 px-2.5 text-right font-mono tabular-nums text-slate-400">
-                        {t.supply > 0 ? formatCompactNumber(t.supply) : '—'}
-                      </td>
-                    </tr>
-                  );
-                })}
+                {filtered.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="py-10 text-center font-mono text-xs text-slate-500">
+                      {tokenSearchLoading
+                        ? 'Searching XRPLMeta & on-ledger issuers…'
+                        : viewMode === 'live'
+                          ? 'Listening for issued tokens on the live XRPL transaction stream…'
+                          : viewMode === 'pinned'
+                            ? 'No pinned tokens yet. Click the ★ icon on any token or use "Add / Pin Custom Token".'
+                            : 'No local matches yet. Click "Search Ledger" or enter CURRENCY:rIssuer to query directly on-ledger.'}
+                    </td>
+                  </tr>
+                ) : (
+                  filtered.map((t) => {
+                    const active = selectedToken?.id === t.id;
+                    const isPinned = pinnedKeySet.has(canonicalTokenKey(t.currencyRaw || t.currency, t.issuer));
+                    return (
+                      <tr
+                        key={t.id}
+                        onClick={() => void selectToken(t)}
+                        className={`cursor-pointer transition-colors ${
+                          active ? 'bg-cyan-500/15' : 'hover:bg-slate-900/70'
+                        }`}
+                      >
+                        <td className="py-2 px-1.5">
+                          <button
+                            type="button"
+                            onClick={(e) => togglePin(e, t)}
+                            title={isPinned ? 'Unpin token' : 'Pin token for quick access'}
+                            className={`p-1 rounded hover:bg-slate-800 ${
+                              isPinned ? 'text-amber-400' : 'text-slate-600 hover:text-amber-300'
+                            }`}
+                          >
+                            <Star className={`w-3.5 h-3.5 ${isPinned ? 'fill-amber-400' : ''}`} />
+                          </button>
+                        </td>
+                        <td className="py-2 px-2.5">
+                          <div className="font-mono font-bold text-white flex items-center gap-1.5">
+                            <span>{t.currency}</span>
+                            {(t.source === 'live-stream' || (t.liveTxCount ?? 0) > 0) && (
+                              <span className="px-1 py-0.2 rounded bg-emerald-500/20 text-[9px] text-emerald-300">
+                                LIVE{t.liveTxCount ? ` ${t.liveTxCount}` : ''}
+                              </span>
+                            )}
+                            {t.source === 'on-ledger' && (
+                              <span className="px-1 py-0.2 rounded bg-cyan-500/20 text-[9px] text-cyan-300">
+                                RPC
+                              </span>
+                            )}
+                          </div>
+                          {t.name && <div className="text-[10px] text-slate-500 truncate max-w-[140px]">{t.name}</div>}
+                        </td>
+                        <td className="py-2 px-2.5">
+                          <div className="text-slate-200 text-[11px] truncate max-w-[160px]">
+                            {t.domain ?? '—'}
+                          </div>
+                          <div className="font-mono text-[10px] text-slate-500">
+                            {shortenAddress(t.issuer, 8, 5)}
+                          </div>
+                        </td>
+                        <td className="py-2 px-2.5 text-right font-mono tabular-nums text-cyan-300">
+                          {t.trustlines > 0 ? formatCompactNumber(t.trustlines) : '—'}
+                        </td>
+                        <td className="py-2 px-2.5 text-right font-mono tabular-nums text-slate-300">
+                          {t.holders > 0 ? formatCompactNumber(t.holders) : '—'}
+                        </td>
+                        <td className="py-2 px-2.5 text-right font-mono tabular-nums text-slate-400">
+                          {t.supply > 0
+                            ? formatCompactNumber(t.supply)
+                            : t.liveTxCount
+                              ? `${t.liveTxCount} tx`
+                              : '—'}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
           </div>
+
+          {viewMode === 'all' && !query.trim() && tokensHasMore && (
+            <div className="pt-3 mt-2 border-t border-slate-800/80 flex justify-center">
+              <button
+                type="button"
+                disabled={tokensLoading}
+                onClick={() => void loadMoreTokens()}
+                className="px-4 py-1.5 rounded-lg bg-slate-950 border border-slate-700 hover:border-cyan-400/60 text-xs font-mono text-cyan-200 disabled:opacity-50"
+              >
+                {tokensLoading ? 'Loading next 200 tokens…' : 'Load More Tokens from XRPLMeta (+200)'}
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Authoritative On-Ledger Inspector (Direct Node RPC) */}

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   Activity,
+  Bot,
   Download,
   Gauge,
   HelpCircle,
@@ -30,6 +31,9 @@ export const TopHudBar: React.FC = () => {
   const tpsEstimate = useCommandStore((s) => s.tpsEstimate);
   const marketPrice = useCommandStore((s) => s.marketPrice);
   const vaultStatus = useCommandStore((s) => s.vaultStatus);
+  const mcpStatus = useCommandStore((s) => s.mcpStatus);
+  const agentDrawerOpen = useCommandStore((s) => s.agentDrawerOpen);
+  const setAgentDrawerOpen = useCommandStore((s) => s.setAgentDrawerOpen);
   const paused = useCommandStore((s) => s.paused);
   const reducedMotion = useCommandStore((s) => s.reducedMotion);
   const soundAlertsEnabled = useCommandStore((s) => s.soundAlertsEnabled);
@@ -112,7 +116,7 @@ export const TopHudBar: React.FC = () => {
                 title="Open Seamless App Updater & Diagnostics"
                 className="px-1.5 py-0.5 rounded bg-cyan-500/15 border border-cyan-400/30 hover:border-cyan-300 font-mono text-[10px] text-cyan-300 transition-colors"
               >
-                v0.2.11-beta
+                v0.3.0-beta
               </button>
               {(updaterState?.updateState === 'available' ||
                 updaterState?.updateState === 'downloaded') && (
@@ -295,6 +299,25 @@ export const TopHudBar: React.FC = () => {
 
       {/* Right Action Controls */}
       <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setAgentDrawerOpen(!agentDrawerOpen)}
+          title="Open Agent & MCP Command Hub (Ctrl+J) — Copilot Chat, Local MCP Server & Audit Log"
+          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border font-mono text-[11px] transition-colors ${
+            agentDrawerOpen
+              ? 'bg-cyan-500/20 border-cyan-400 text-cyan-100 shadow-glowCyan'
+              : mcpStatus?.running
+                ? 'bg-emerald-500/15 border-emerald-400/45 text-emerald-200 hover:bg-emerald-500/25'
+                : 'bg-slate-950/90 border-cyan-500/35 text-cyan-200 hover:border-cyan-400 hover:bg-cyan-500/15'
+          }`}
+        >
+          <Bot className="w-3.5 h-3.5 text-cyan-300" />
+          <span className="hidden sm:inline">Agent / MCP</span>
+          {mcpStatus?.running && (
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+          )}
+        </button>
+
         <button
           type="button"
           onClick={() => setActiveTab('wallets')}

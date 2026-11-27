@@ -4,8 +4,31 @@ import type {
   MarketOhlcResponse,
   OhlcCandle,
 } from './chartIndicators';
+import type {
+  AgentChatMessage,
+  AgentProviderConfig,
+  AgentProviderId,
+  McpAuditEntry,
+  McpRendererAction,
+  McpServerStatus,
+  McpToolSpec,
+  McpToolTier,
+} from './mcpAgentUtils';
 
-export type { ChartTimeframe, MarketOhlcRequest, MarketOhlcResponse, OhlcCandle };
+export type {
+  AgentChatMessage,
+  AgentProviderConfig,
+  AgentProviderId,
+  ChartTimeframe,
+  MarketOhlcRequest,
+  MarketOhlcResponse,
+  McpAuditEntry,
+  McpRendererAction,
+  McpServerStatus,
+  McpToolSpec,
+  McpToolTier,
+  OhlcCandle,
+};
 
 export type NetworkId = 'mainnet' | 'testnet' | 'devnet' | 'custom';
 
@@ -71,6 +94,7 @@ export interface LiveTransaction {
   amountXrpEstimate: number;
   currency?: string;
   issuer?: string;
+  observedTokens?: Array<{ currency: string; currencyRaw: string; issuer: string }>;
   feeDrops: number;
   validated: boolean;
   engineResult?: string;
@@ -147,8 +171,10 @@ export interface TokenRecord {
   volume24hUsd: number;
   marketcapUsd: number;
   priceUsd: number;
-  source: 'xrplmeta' | 'live-stream' | 'curated';
+  source: 'xrplmeta' | 'live-stream' | 'on-ledger' | 'pinned' | 'curated';
   lastSeenAt?: number;
+  liveTxCount?: number;
+  pinned?: boolean;
 }
 
 export interface IssuerRiskFlags {
@@ -361,6 +387,8 @@ export interface VaultStatus {
   backend?: 'rust-sidecar' | 'node-fallback';
   kdf?: string;
   sidecarPid?: number;
+  autoLockMinutes?: number;
+  autoLockAt?: number | null;
   accounts: WalletAccountPublic[];
 }
 
@@ -947,10 +975,23 @@ export interface XrplDesktopApi {
     fetchedAt: number;
     source: string;
   }>;
-  fetchTokens: (networkId: NetworkId) => Promise<{
+  fetchTokens: (
+    networkId: NetworkId,
+    options?: { limit?: number; offset?: number; sortBy?: string }
+  ) => Promise<{
     tokens: TokenRecord[];
     fetchedAt: number;
     source: string;
+    hasMore?: boolean;
+  }>;
+  searchTokens: (
+    query: string,
+    networkId: NetworkId
+  ) => Promise<{
+    tokens: TokenRecord[];
+    source: string;
+    fetchedAt: number;
+    error?: string;
   }>;
   inspectTokenOnLedger: (currencyRaw: string, issuer: string) => Promise<TokenOnLedgerReport>;
   inspectQuery: (query: string) => Promise<InspectorResult>;
@@ -1056,13 +1097,37 @@ export interface XrplDesktopApi {
   encodeXAddress: (classicAddress: string, tag?: number | null, isTestnet?: boolean) => Promise<XAddressEncodeResult>;
   walletExportBackup: () => Promise<VaultBackupResult>;
   walletImportBackup: () => Promise<VaultBackupResult>;
-  walletSetAutoLockMinutes: (minutes: number) => Promise<{ ok: boolean; minutes: number }>;
+  walletSetAutoLockMinutes: (minutes: number) => Promise<{ ok: boolean; minutes: number; autoLockAt?: number | null }>;
   walletExportSecurityAudit: (payload: {
     defaultFilename: string;
     markdown: string;
   }) => Promise<{ ok: boolean; filePath?: string; cancelled?: boolean; error?: string }>;
   analyticsExportTaxCsv: () => Promise<{ ok: boolean; filePath?: string; rowCount?: number; error?: string }>;
   systemExportDiagnostics: () => Promise<{ ok: boolean; filePath?: string; cancelled?: boolean; error?: string }>;
+
+  // v0.3.0-beta: Agent & MCP Hub + Live Vault Lock Push
+  mcpGetStatus: () => Promise<McpServerStatus>;
+  mcpUpdateConfig: (patch: {
+    enabled?: boolean;
+    port?: number;
+    allowAutomation?: boolean;
+    allowTxDrafting?: boolean;
+  }) => Promise<McpServerStatus>;
+  mcpRotateToken: () => Promise<McpServerStatus>;
+  mcpUpdateProvider: (patch: {
+    provider?: AgentProviderId;
+    endpointUrl?: string;
+    model?: string;
+    apiKey?: string | null;
+  }) => Promise<McpServerStatus>;
+  mcpClearAuditLog: () => Promise<McpServerStatus>;
+  agentSendMessage: (
+    message: string,
+    history?: Array<{ role: 'user' | 'assistant'; content: string }>
+  ) => Promise<{ ok: boolean; reply: AgentChatMessage; error?: string }>;
+  onMcpStatus: (cb: (status: McpServerStatus) => void) => () => void;
+  onMcpRendererAction: (cb: (action: McpRendererAction) => void) => () => void;
+  onVaultStatusChanged: (cb: (status: VaultStatus) => void) => () => void;
 
   notifyDesktop: (payload: DesktopNotificationPayload) => Promise<void>;
   onStreamStatus: (cb: (status: StreamStatus) => void) => () => void;

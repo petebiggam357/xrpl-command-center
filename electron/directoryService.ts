@@ -28,6 +28,10 @@ import {
   parseLiveTransactionEvent,
   rippleTimeToUnixMs,
 } from '../src/shared/xrplCodec';
+import {
+  canonicalTokenKey,
+  parseTokenQueryInput,
+} from '../src/shared/tokenDiscoveryUtils';
 import type { XrplStreamManager } from './xrplStream';
 
 interface CacheSlot<T> {
@@ -139,7 +143,7 @@ async function fetchJsonWithTimeout<T>(url: string, timeoutMs = 10_000): Promise
       signal: controller.signal,
       headers: {
         Accept: 'application/json',
-        'User-Agent': 'XRPL-Command-Center/0.2.11-beta',
+        'User-Agent': 'XRPL-Command-Center/0.3.0-beta',
       },
     });
     if (!res.ok) {
@@ -151,12 +155,40 @@ async function fetchJsonWithTimeout<T>(url: string, timeoutMs = 10_000): Promise
   }
 }
 
+function mapXrplMetaToken(raw: Record<string, unknown>): TokenRecord | null {
+  const currencyRaw = String(raw.currency ?? '').trim();
+  const issuer = String(raw.issuer ?? '').trim();
+  if (!currencyRaw || !issuer) return null;
+  const meta = (raw.meta ?? {}) as Record<string, unknown>;
+  const tokenMeta = (meta.token ?? {}) as Record<string, unknown>;
+  const issuerMeta = (meta.issuer ?? {}) as Record<string, unknown>;
+  const metrics = (raw.metrics ?? {}) as Record<string, unknown>;
+
+  return {
+    id: canonicalTokenKey(currencyRaw, issuer),
+    currency: decodeCurrencyCode(currencyRaw),
+    currencyRaw,
+    issuer,
+    name: typeof tokenMeta.name === 'string' ? tokenMeta.name : undefined,
+    domain: typeof issuerMeta.domain === 'string' ? issuerMeta.domain : undefined,
+    icon: typeof tokenMeta.icon === 'string' ? tokenMeta.icon : undefined,
+    holders: Number(metrics.holders ?? 0) || 0,
+    trustlines: Number(metrics.trustlines ?? 0) || 0,
+    supply: Number(metrics.supply ?? 0) || 0,
+    volume24hUsd: Number(metrics.volume_24h ?? 0) || 0,
+    marketcapUsd: Number(metrics.marketcap ?? 0) || 0,
+    priceUsd: Number(metrics.price ?? 0) || 0,
+    source: 'xrplmeta',
+  };
+}
+
 export class DirectoryService {
   private validatorCache = new Map<
     string,
     CacheSlot<{ validators: ValidatorRecord[]; topology: TopologyNode[]; source: string }>
   >();
-  private tokenCache = new Map<string, CacheSlot<{ tokens: TokenRecord[]; source: string }>>();
+  private tokenCache = new Map<string, CacheSlot<{ tokens: TokenRecord[]; source: string; hasMore: boolean }>>();
+  private tokenSearchCache = new Map<string, CacheSlot<{ tokens: TokenRecord[]; source: string }>>();
   private priceCache: CacheSlot<MarketPriceSnapshot> | null = null;
   private ohlcCache = new Map<string, CacheSlot<MarketOhlcResponse>>();
   private amendmentCache: CacheSlot<{ amendments: AmendmentVoteRecord[]; source: string }> | null = null;
@@ -627,75 +659,292 @@ export class DirectoryService {
     return { validators, topology, fetchedAt: now, source };
   }
 
-  public async fetchTokens(networkId: NetworkId): Promise<{
+  public async fetchTokens(
+    networkId: NetworkId,
+    options?: { limit?: number; offset?: number; sortBy?: string }
+  ): Promise<{
     tokens: TokenRecord[];
     fetchedAt: number;
     source: string;
+    hasMore: boolean;
   }> {
     if (networkId !== 'mainnet' && networkId !== 'custom') {
       return {
         tokens: [],
         fetchedAt: Date.now(),
         source: `${networkId}-live-discovery`,
+        hasMore: false,
       };
     }
 
-    const cached = this.tokenCache.get('mainnet');
+    const limit = Math.max(20, Math.min(250, Number(options?.limit ?? 200) || 200));
+    const offset = Math.max(0, Math.floor(Number(options?.offset ?? 0) || 0));
+    const sortBy =
+      options?.sortBy === 'holders' || options?.sortBy === 'volume_24h' || options?.sortBy === 'marketcap'
+        ? options.sortBy
+        : 'trustlines';
+
+    const cacheKey = `mainnet:${sortBy}:${limit}:${offset}`;
+    const cached = this.tokenCache.get(cacheKey);
     if (cached && Date.now() - cached.fetchedAt < TOKEN_CACHE_TTL_MS) {
       return { ...cached.data, fetchedAt: cached.fetchedAt };
     }
 
     try {
-      const data = await fetchJsonWithTimeout<{ tokens?: Array<Record<string, unknown>> }>(
-        'https://s1.xrplmeta.org/tokens?limit=160&sort_by=trustlines&include_changes=false',
+      const url = `https://s1.xrplmeta.org/tokens?limit=${limit}&offset=${offset}&sort_by=${encodeURIComponent(sortBy)}&include_changes=false`;
+      const data = await fetchJsonWithTimeout<{ count?: number; tokens?: Array<Record<string, unknown>> }>(
+        url,
         12_000
       );
 
       const list: TokenRecord[] = [];
       for (const raw of data.tokens ?? []) {
-        const currencyRaw = String(raw.currency ?? '');
-        const issuer = String(raw.issuer ?? '');
-        if (!currencyRaw || !issuer) continue;
-        const meta = (raw.meta ?? {}) as Record<string, unknown>;
-        const tokenMeta = (meta.token ?? {}) as Record<string, unknown>;
-        const issuerMeta = (meta.issuer ?? {}) as Record<string, unknown>;
-        const metrics = (raw.metrics ?? {}) as Record<string, unknown>;
-
-        list.push({
-          id: `${currencyRaw}:${issuer}`,
-          currency: decodeCurrencyCode(currencyRaw),
-          currencyRaw,
-          issuer,
-          name: typeof tokenMeta.name === 'string' ? tokenMeta.name : undefined,
-          domain: typeof issuerMeta.domain === 'string' ? issuerMeta.domain : undefined,
-          icon: typeof tokenMeta.icon === 'string' ? tokenMeta.icon : undefined,
-          holders: Number(metrics.holders ?? 0) || 0,
-          trustlines: Number(metrics.trustlines ?? 0) || 0,
-          supply: Number(metrics.supply ?? 0) || 0,
-          volume24hUsd: Number(metrics.volume_24h ?? 0) || 0,
-          marketcapUsd: Number(metrics.marketcap ?? 0) || 0,
-          priceUsd: Number(metrics.price ?? 0) || 0,
-          source: 'xrplmeta',
-        });
+        const mapped = mapXrplMetaToken(raw);
+        if (mapped) list.push(mapped);
       }
 
       if (list.length > 0) {
         const now = Date.now();
-        this.tokenCache.set('mainnet', {
+        const totalCount = Number(data.count ?? 0);
+        const hasMore = totalCount > 0 ? offset + list.length < totalCount : list.length >= limit;
+        this.tokenCache.set(cacheKey, {
           fetchedAt: now,
-          data: { tokens: list, source: 's1.xrplmeta.org' },
+          data: { tokens: list, source: 's1.xrplmeta.org', hasMore },
         });
-        return { tokens: list, fetchedAt: now, source: 's1.xrplmeta.org' };
+        return { tokens: list, fetchedAt: now, source: 's1.xrplmeta.org', hasMore };
       }
     } catch {
       // fall through
+    }
+
+    if (offset > 0) {
+      return {
+        tokens: [],
+        fetchedAt: Date.now(),
+        source: 's1.xrplmeta.org',
+        hasMore: false,
+      };
     }
 
     return {
       tokens: CURATED_FALLBACK_TOKENS,
       fetchedAt: Date.now(),
       source: 'curated-fallback',
+      hasMore: false,
     };
+  }
+
+  /**
+   * Full-ledger token discovery: searches the entire 100,000+ XRPLMeta registry by exact
+   * currency code, name/ticker substring, or issuer address, AND falls back to direct
+   * on-ledger RPC (`gateway_balances` + `account_info`) so newly created or unindexed tokens
+   * (such as user-created tokens or Testnet/Devnet IOUs) are immediately discoverable.
+   */
+  public async searchTokens(
+    stream: XrplStreamManager,
+    rawQuery: string,
+    networkId: NetworkId
+  ): Promise<{
+    tokens: TokenRecord[];
+    source: string;
+    fetchedAt: number;
+    error?: string;
+  }> {
+    const parsed = parseTokenQueryInput(rawQuery);
+    const now = Date.now();
+    if (parsed.kind === 'empty') {
+      return { tokens: [], source: 'empty-query', fetchedAt: now };
+    }
+
+    const cacheKey = `${networkId}:${parsed.raw.toLowerCase()}`;
+    const cached = this.tokenSearchCache.get(cacheKey);
+    if (cached && now - cached.fetchedAt < 30_000) {
+      return { ...cached.data, fetchedAt: cached.fetchedAt };
+    }
+
+    const byKey = new Map<string, TokenRecord>();
+    const sources = new Set<string>();
+
+    const upsertToken = (tok: TokenRecord, preferIncoming: boolean) => {
+      const key = canonicalTokenKey(tok.currencyRaw || tok.currency, tok.issuer);
+      const existing = byKey.get(key);
+      if (!existing) {
+        byKey.set(key, { ...tok, id: key });
+        return;
+      }
+      if (preferIncoming) {
+        byKey.set(key, {
+          ...existing,
+          ...tok,
+          id: key,
+          holders: Math.max(existing.holders, tok.holders),
+          trustlines: Math.max(existing.trustlines, tok.trustlines),
+          supply: Math.max(existing.supply, tok.supply),
+        });
+      }
+    };
+
+    const queryXrplMeta = async (url: string) => {
+      const data = await fetchJsonWithTimeout<{ tokens?: Array<Record<string, unknown>> }>(url, 9_000);
+      const rows = data.tokens ?? [];
+      if (rows.length > 0) sources.add('s1.xrplmeta.org');
+      for (const raw of rows) {
+        const mapped = mapXrplMetaToken(raw);
+        if (mapped) upsertToken(mapped, true);
+      }
+    };
+
+    const queryIssuerOnLedger = async (issuer: string, filterCurrencyRaw?: string) => {
+      try {
+        const [acctRes, gwRes] = await Promise.allSettled([
+          stream.request('account_info', { account: issuer, ledger_index: 'validated' }),
+          stream.request('gateway_balances', { account: issuer, ledger_index: 'validated' }),
+        ]);
+
+        let domain: string | undefined;
+        if (acctRes.status === 'fulfilled') {
+          const acctData = (acctRes.value.result as Record<string, unknown> | undefined)?.account_data as
+            | Record<string, unknown>
+            | undefined;
+          if (acctData && typeof acctData.Domain === 'string') {
+            domain = decodeHexAscii(acctData.Domain);
+          }
+        }
+
+        let foundObligation = false;
+        if (gwRes.status === 'fulfilled') {
+          const obligations = ((gwRes.value.result as Record<string, unknown> | undefined)?.obligations ??
+            {}) as Record<string, string>;
+          for (const [curRaw, supplyStr] of Object.entries(obligations)) {
+            if (filterCurrencyRaw && curRaw.toUpperCase() !== filterCurrencyRaw.toUpperCase()) continue;
+            foundObligation = true;
+            sources.add('on-ledger RPC');
+            upsertToken(
+              {
+                id: canonicalTokenKey(curRaw, issuer),
+                currency: decodeCurrencyCode(curRaw),
+                currencyRaw: curRaw,
+                issuer,
+                domain,
+                holders: 0,
+                trustlines: 0,
+                supply: Number(supplyStr) || 0,
+                volume24hUsd: 0,
+                marketcapUsd: 0,
+                priceUsd: 0,
+                source: 'on-ledger',
+                lastSeenAt: now,
+              },
+              false
+            );
+          }
+        }
+
+        // If user explicitly queried CURRENCY:rIssuer and account exists on ledger, surface it even if supply is 0
+        if (filterCurrencyRaw && !foundObligation && acctRes.status === 'fulfilled') {
+          sources.add('on-ledger RPC');
+          upsertToken(
+            {
+              id: canonicalTokenKey(filterCurrencyRaw, issuer),
+              currency: decodeCurrencyCode(filterCurrencyRaw),
+              currencyRaw: filterCurrencyRaw,
+              issuer,
+              domain,
+              holders: 0,
+              trustlines: 0,
+              supply: 0,
+              volume24hUsd: 0,
+              marketcapUsd: 0,
+              priceUsd: 0,
+              source: 'on-ledger',
+              lastSeenAt: now,
+            },
+            false
+          );
+        }
+      } catch {
+        // non-fatal when disconnected
+      }
+    };
+
+    const tasks: Array<Promise<unknown>> = [];
+    const allowMeta = networkId === 'mainnet' || networkId === 'custom';
+
+    if (parsed.kind === 'pair') {
+      if (allowMeta) {
+        tasks.push(
+          queryXrplMeta(
+            `https://s1.xrplmeta.org/tokens?currency=${encodeURIComponent(parsed.currencyRaw)}&issuer=${encodeURIComponent(parsed.issuer)}&limit=10&include_changes=false`
+          )
+        );
+      }
+      tasks.push(queryIssuerOnLedger(parsed.issuer, parsed.currencyRaw));
+    } else if (parsed.kind === 'issuer') {
+      if (allowMeta) {
+        tasks.push(
+          queryXrplMeta(
+            `https://s1.xrplmeta.org/tokens?issuer=${encodeURIComponent(parsed.issuer)}&limit=100&sort_by=trustlines&include_changes=false`
+          )
+        );
+      }
+      tasks.push(queryIssuerOnLedger(parsed.issuer));
+    } else if (parsed.kind === 'hex-currency') {
+      if (allowMeta) {
+        tasks.push(
+          queryXrplMeta(
+            `https://s1.xrplmeta.org/tokens?currency=${encodeURIComponent(parsed.currencyRaw)}&limit=80&sort_by=trustlines&include_changes=false`
+          )
+        );
+      }
+    } else if (parsed.kind === 'search') {
+      if (allowMeta) {
+        tasks.push(
+          queryXrplMeta(
+            `https://s1.xrplmeta.org/tokens?name_like=${encodeURIComponent(parsed.query)}&limit=60&sort_by=trustlines&include_changes=false`
+          )
+        );
+        if (parsed.encodedCurrency) {
+          tasks.push(
+            queryXrplMeta(
+              `https://s1.xrplmeta.org/tokens?currency=${encodeURIComponent(parsed.encodedCurrency)}&limit=60&sort_by=trustlines&include_changes=false`
+            )
+          );
+          // Also check exact uppercase vs mixed-case 40-hex if query has lowercase chars (XRPL non-standard codes are case-sensitive!)
+          const upper = parsed.query.toUpperCase();
+          if (upper !== parsed.query && upper.length > 3) {
+            try {
+              const upperEncoded = encodeCurrencyCode(upper);
+              if (upperEncoded !== parsed.encodedCurrency) {
+                tasks.push(
+                  queryXrplMeta(
+                    `https://s1.xrplmeta.org/tokens?currency=${encodeURIComponent(upperEncoded)}&limit=40&sort_by=trustlines&include_changes=false`
+                  )
+                );
+              }
+            } catch {
+              // ignore
+            }
+          }
+        }
+      }
+    }
+
+    await Promise.allSettled(tasks);
+
+    const exactTarget = parsed.raw.toLowerCase();
+    const results = Array.from(byKey.values()).sort((a, b) => {
+      const aExact = a.currency.toLowerCase() === exactTarget ? 1 : 0;
+      const bExact = b.currency.toLowerCase() === exactTarget ? 1 : 0;
+      if (aExact !== bExact) return bExact - aExact;
+      if (b.trustlines !== a.trustlines) return b.trustlines - a.trustlines;
+      return b.supply - a.supply;
+    });
+
+    const source = sources.size > 0 ? Array.from(sources).join(' + ') : allowMeta ? 's1.xrplmeta.org' : `${networkId}-on-ledger`;
+    if (results.length > 0) {
+      this.tokenSearchCache.set(cacheKey, { fetchedAt: now, data: { tokens: results, source } });
+    }
+    return { tokens: results, source, fetchedAt: now };
   }
 
   public async inspectTokenOnLedger(

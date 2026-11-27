@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type {
+  AgentProviderId,
   AssetSpec,
   ConsensusPhase,
   DesktopNotificationPayload,
@@ -7,10 +8,13 @@ import type {
   LedgerSnapshot,
   LiveTransaction,
   MarketOhlcRequest,
+  McpRendererAction,
+  McpServerStatus,
   NetworkId,
   NodeConnectionConfig,
   StreamStatus,
   ValidationPulse,
+  VaultStatus,
   WalletAlgorithm,
   WalletTxIntent,
   XrplDesktopApi,
@@ -27,14 +31,17 @@ function subscribeChannel<T>(channel: string, cb: (payload: T) => void): () => v
 const api: XrplDesktopApi = {
   isElectron: true,
   platform: process.platform,
-  version: '0.2.11-beta',
+  version: '0.3.0-beta',
   connectNetwork: (networkId: NetworkId, customEndpoint?: string) =>
     ipcRenderer.invoke('xrpl:connect', networkId, customEndpoint),
   getStreamStatus: () => ipcRenderer.invoke('xrpl:getStatus'),
   rpcRequest: (command: string, params?: Record<string, unknown>) =>
     ipcRenderer.invoke('xrpl:rpc', command, params),
   fetchValidators: (networkId: NetworkId) => ipcRenderer.invoke('xrpl:fetchValidators', networkId),
-  fetchTokens: (networkId: NetworkId) => ipcRenderer.invoke('xrpl:fetchTokens', networkId),
+  fetchTokens: (networkId: NetworkId, options?: { limit?: number; offset?: number; sortBy?: string }) =>
+    ipcRenderer.invoke('xrpl:fetchTokens', networkId, options),
+  searchTokens: (query: string, networkId: NetworkId) =>
+    ipcRenderer.invoke('xrpl:searchTokens', query, networkId),
   inspectTokenOnLedger: (currencyRaw: string, issuer: string) =>
     ipcRenderer.invoke('xrpl:inspectToken', currencyRaw, issuer),
   inspectQuery: (query: string) => ipcRenderer.invoke('xrpl:inspectQuery', query),
@@ -138,6 +145,32 @@ const api: XrplDesktopApi = {
     ipcRenderer.invoke('wallet:exportSecurityAudit', payload),
   analyticsExportTaxCsv: () => ipcRenderer.invoke('analytics:exportTaxCsv'),
   systemExportDiagnostics: () => ipcRenderer.invoke('system:exportDiagnostics'),
+
+  // v0.3.0-beta: Agent & MCP Hub + Live Vault Lock Push
+  mcpGetStatus: () => ipcRenderer.invoke('mcp:getStatus'),
+  mcpUpdateConfig: (patch: {
+    enabled?: boolean;
+    port?: number;
+    allowAutomation?: boolean;
+    allowTxDrafting?: boolean;
+  }) => ipcRenderer.invoke('mcp:updateConfig', patch),
+  mcpRotateToken: () => ipcRenderer.invoke('mcp:rotateToken'),
+  mcpUpdateProvider: (patch: {
+    provider?: AgentProviderId;
+    endpointUrl?: string;
+    model?: string;
+    apiKey?: string | null;
+  }) => ipcRenderer.invoke('mcp:updateProvider', patch),
+  mcpClearAuditLog: () => ipcRenderer.invoke('mcp:clearAuditLog'),
+  agentSendMessage: (
+    message: string,
+    history?: Array<{ role: 'user' | 'assistant'; content: string }>
+  ) => ipcRenderer.invoke('agent:sendMessage', message, history),
+  onMcpStatus: (cb: (status: McpServerStatus) => void) => subscribeChannel('mcp:status', cb),
+  onMcpRendererAction: (cb: (action: McpRendererAction) => void) =>
+    subscribeChannel('mcp:rendererAction', cb),
+  onVaultStatusChanged: (cb: (status: VaultStatus) => void) =>
+    subscribeChannel('wallet:vaultStatusChanged', cb),
 
   notifyDesktop: (payload: DesktopNotificationPayload) => ipcRenderer.invoke('desktop:notify', payload),
   onStreamStatus: (cb: (status: StreamStatus) => void) => subscribeChannel('xrpl:status', cb),

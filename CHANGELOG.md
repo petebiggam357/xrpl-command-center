@@ -2,6 +2,27 @@
 
 All notable changes to **XRPL Command Center** are documented in this file.
 
+## [0.3.0-beta] - 2026-11-27
+
+### Added & Improved
+- **Agentic Capabilities & Loopback-Only Local MCP Hub (Top-Bar Slide-Over Drawer, `Ctrl+J`):**
+  - Added a dedicated **`Agent / MCP`** button in `TopHudBar` (keeping the clean 13-tab sidebar unchanged) opening the slide-over **`AgentMcpDrawer`** accessible from any screen.
+  - Built an embedded **Model Context Protocol (JSON-RPC 2.0) HTTP Server** (`electron/mcpAgentService.ts`) bound strictly to `127.0.0.1` (default port `18490`, configurable `1024–65535`) with a rotatable **256-bit Bearer Token** (timing-safe auth), 1-click **Claude Desktop / Cursor / Antigravity JSON config** & `curl` smoke-test copy, and **14 tiered MCP tools**:
+    - **Tier 1 (Read-Only):** `xrpl_get_network_status`, `xrpl_get_latest_ledgers`, `xrpl_rpc_query` (strictly allowlisted read-only RPCs), `xrpl_inspect_account`, `xrpl_search_tokens`, `xrpl_get_token_market`, `xrpl_get_node_health`, `xrpl_get_wallet_portfolio` (strictly blocked with `VAULT_LOCKED` when vault is locked; never exposes seeds).
+    - **Tier 2 (Cockpit & Node Automation):** `cc_navigate_tab`, `cc_focus_token`, `cc_add_price_alert`, `cc_add_watchlist`, `cc_node_docker_action`.
+    - **Tier 3 (Human-in-the-Loop Tx Drafting):** `xrpl_draft_transaction` — strictly opens the native `TxConfirmModal` for explicit user review and signing; agents can never sign or broadcast autonomously.
+  - Added **In-App XRPL Agent Copilot** with a **Built-in Local Copilot (Zero API Key)** deterministic command router plus BYO **Ollama (Local)**, **OpenAI**, **Anthropic Claude**, and **Google Gemini** tool-calling engines (API keys stored encrypted via OS keyring) and a live seed-redacted **Tool Audit Log**.
+- **Strict Vault Lock Privacy Shield & Configurable Lock Timeout (`Wallets & DeFi` + `Analytics`):**
+  - When the encrypted Vault is locked (`vaultStatus.initialized && !vaultStatus.unlocked`), **all wallet data below the passphrase bar is completely hidden** behind a **Vault Locked — Privacy Shield Active** screen (hiding tracked wallets, addresses, combined net worth, balances, trustlines, NFTs, transaction history, and modals) and cached portfolio/balance maps are immediately cleared from renderer memory.
+  - Added an inline **Auto-Lock Timeout** control (`1m / 5m / 15m / 30m / 60m / 2h / Never (Manual)`) right in the `WalletDeck` header bar (synced with `AnalyticsDeck`), persisted in `userData/vault-prefs.json` across restarts, with a live lock countdown badge and instant main-to-renderer `wallet:vaultStatusChanged` auto-lock broadcast.
+- **3D Holographic Validator & Consensus Globe Upgrade (`ValidatorGlobe3D`):**
+  - Upgraded the Three.js WebGL2 globe with lit `MeshPhongMaterial` bathymetric ocean specular shading, topographic continent relief, glowing global city/hub light clusters, a custom **GLSL Fresnel Atmosphere Shader**, deep-space starfield, tilted orbital telemetry rings, **3D UNL Validator vertical beacons**, radial-glow node sprites, **traveling photon packets** along geodesic consensus arcs, a **3D Ledger-Close Quorum Shockwave Ring**, floating **hover tooltips**, **All / UNL / Validators / Peers** layer filters, **Arcs ON/OFF**, and smooth zoom/reset controls.
+- **Full-Ledger Token Discovery, Live Stream Token Capture & Custom Token Pinning (`Tokens & DEX`):**
+  - Added `src/shared/tokenDiscoveryUtils.ts` and `DirectoryService.searchTokens` (`xrpl:searchTokens`) querying the entire `100,000+` **XRPLMeta** registry by exact currency code, name/ticker substring, or issuer address, paired with **direct on-ledger RPC discovery** (`gateway_balances` + `account_info`) so user-created, unindexed, or Testnet/Devnet tokens (e.g., `RIP` or `CURRENCY:rIssuer`) appear immediately.
+  - Fixed live-stream token capture (`extractIssuedTokensFromTx`) to scan all issued-currency fields across `Payment`, `OfferCreate`, `TrustSet`, `Check*`, `Clawback`, and `AMM*` transactions with canonical 40-hex `currencyRaw` encoding (up to 400 live-observed tokens without overwriting on index sync).
+  - Added **All Ledger / Live on Stream / Pinned** tabs, 1-click ★ **Pin/Unpin**, an inline **+ Add / Pin Custom Token** form, and **Load More Tokens (+200)** pagination.
+- **Verification:** Added `tests/v030AgentVaultTokens.test.ts` (11 new unit + loopback HTTP & mock LLM provider integration tests; **123/123** total Vitest tests passing across 21 suites).
+
 ## [0.2.11-beta] - 2026-11-27
 
 ### Added
