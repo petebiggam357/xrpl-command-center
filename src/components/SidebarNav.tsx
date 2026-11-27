@@ -33,6 +33,7 @@ const NAV_GROUPS: Array<{
     title: 'Observe & Telemetry',
     items: [
       { id: 'command', label: 'Command Deck', subtitle: 'Live Pulse & Mempool', icon: Radar },
+      { id: 'wallets', label: 'Wallets & DeFi', subtitle: 'Vault, Ledger, PathSwap', icon: Wallet },
       { id: 'globe', label: '3D Globe', subtitle: 'Holographic Consensus', icon: Globe2 },
       { id: 'validators', label: 'Validators', subtitle: 'UNL & Quorum Health', icon: ShieldCheck },
       { id: 'tokens', label: 'Tokens & DEX', subtitle: 'Depth, Spread & AMM IL', icon: Coins },
@@ -44,7 +45,6 @@ const NAV_GROUPS: Array<{
       { id: 'launcher', label: 'Token Launcher', subtitle: 'IOU / MPT & Airdrops', icon: Rocket },
       { id: 'nftstudio', label: 'NFT Studio', subtitle: 'XLS-20 Mint & Playbook', icon: Image },
       { id: 'vaults', label: 'Vaults & Lending', subtitle: 'XLS-65 & XLS-66 Credit', icon: Landmark },
-      { id: 'wallets', label: 'Wallets & DeFi', subtitle: 'Vault, Ledger, PathSwap', icon: Wallet },
       { id: 'primitives', label: 'Institutional', subtitle: 'MPT, Oracles, DID & TOML', icon: Building2 },
     ],
   },

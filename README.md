@@ -172,7 +172,7 @@ npm run dist:mac     # -> release/XRPL-Command-Center-0.2.7-beta-mac-arm64.dmg
 | :--- | :--- |
 | `Ctrl+K` / `Cmd+K` | Open Universal Command Palette (inspect address, tx hash, ledger, or switch modules) |
 | `Ctrl+B` / `Cmd+B` | Toggle Full-Bleed Widescreen Focus Mode (collapse/expand left navigation rail) |
-| `Alt+1` … `Alt+9` | Instant keyboard jump between primary modules (Command, Globe, Validators, Tokens, Launcher, NFT Studio, Vaults, Wallets, Node Ops) |
+| `Alt+1` … `Alt+9` | Instant keyboard jump between primary modules (Command, Wallets, Globe, Validators, Tokens, Launcher, NFT Studio, Vaults, Node Ops) |
 | `Esc` | Close Command Palette, Signing Modal, Quick-Start, or Inspector Drawer |
 | Top Bar **?** | Re-open the Quick-Start Guide & 1-Click Testnet Playground anytime |
 | Top Bar **Volume** | Toggle optional subtle WebAudio synth ping for Whale Radar & Watchlist hits |

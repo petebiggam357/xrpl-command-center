@@ -24,13 +24,13 @@ export const CommandPalette: React.FC = () => {
 
   const quickNav: Array<{ tab: NavTab; label: string; hint: string }> = [
     { tab: 'command', label: 'Command Deck', hint: 'Live Consensus Core & Particle River' },
+    { tab: 'wallets', label: 'Wallets & Pro DeFi Studio', hint: 'Vault, Ledger USB, Multi-Sig & PathSwap' },
     { tab: 'globe', label: '3D Validator Globe', hint: 'Interactive WebGL2 Holographic Globe' },
     { tab: 'validators', label: 'Validators & UNL', hint: 'Agreement Scores & Live Votes' },
     { tab: 'tokens', label: 'Tokens, DEX & AMM', hint: 'CLOB Depth Wall & AMM x*y=k Curve' },
     { tab: 'launcher', label: 'Token Launcher & Wizard', hint: '5-Step IOU + AMM & XLS-33 MPT Token Launcher' },
     { tab: 'nftstudio', label: 'XLS-20 NFT Studio & Launchpad', hint: '1-of-1 & Collection Minter, Rarity & Playbook' },
     { tab: 'vaults', label: 'XLS-65 Vaults & XLS-66 Lending', hint: 'Single Asset Vaults, Loan Brokers & First-Loss Waterfall' },
-    { tab: 'wallets', label: 'Wallets & Pro DeFi Studio', hint: 'Vault, Ledger USB, Multi-Sig & PathSwap' },
     { tab: 'primitives', label: 'Institutional Primitives', hint: 'MPT, XLS-47 Oracles, DID & xrp-ledger.toml' },
     { tab: 'rpc', label: 'RPC Console & Time Machine', hint: 'Raw rippled JSON-RPC Playground & Historical Ledgers' },
     { tab: 'nodeops', label: 'My Node Ops & Docker', hint: '1-Click Docker Node & rippled.cfg Diff Studio' },

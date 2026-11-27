@@ -160,13 +160,13 @@ export const App: React.FC = () => {
       } else if (e.altKey && !e.ctrlKey && !e.metaKey && /^[1-9]$/.test(e.key)) {
         const tabs = [
           'command',
+          'wallets',
           'globe',
           'validators',
           'tokens',
           'launcher',
           'nftstudio',
           'vaults',
-          'wallets',
           'nodeops',
         ] as const;
         const target = tabs[Number(e.key) - 1];
