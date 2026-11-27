@@ -54,7 +54,7 @@ const NAV_GROUPS: Array<{
       { id: 'rpc', label: 'RPC & Replay', subtitle: 'JSON-RPC & Time Machine', icon: Terminal },
       { id: 'nodeops', label: 'My Node Ops', subtitle: 'Docker, Doctor & Config', icon: Server },
       { id: 'analytics', label: 'Analytics & Tray', subtitle: 'SQLite, CSV & Updater', icon: Database },
-      { id: 'education', label: 'XRPL Academy', subtitle: '11 Lessons & Labs', icon: GraduationCap },
+      { id: 'education', label: 'XRPL Academy', subtitle: '12 Lessons & 6 Animations', icon: GraduationCap },
     ],
   },
 ];

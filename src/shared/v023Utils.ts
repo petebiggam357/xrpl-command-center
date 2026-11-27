@@ -1,3 +1,4 @@
+import { assessQuantumExposure, VAULT_PQC_POSTURE } from './quantumUtils';
 import type { TokenOnLedgerReport, WalletPortfolioSnapshot, WalletTxIntent } from './types';
 
 // ============================================================================
@@ -421,6 +422,7 @@ export function buildAccountSecurityAuditMarkdown(
 ): string {
   const ts = opts.generatedAtIso ?? new Date().toISOString();
   const lockedXrp = Number((portfolio.baseReserveXrp + portfolio.ownerReserveXrp).toFixed(4));
+  const pqReport = assessQuantumExposure(portfolio);
   const usdSuffix = (xrp: number) =>
     opts.xrpUsd !== null && Number.isFinite(opts.xrpUsd)
       ? ` (~$${(xrp * opts.xrpUsd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD)`
@@ -493,7 +495,15 @@ export function buildAccountSecurityAuditMarkdown(
     `| NoFreeze | ${portfolio.flags.noFreeze ? 'ON' : 'OFF'} |`,
     `| AllowClawback | ${portfolio.flags.allowClawback ? 'ON' : 'OFF'} |`,
     '',
-    `## 3. Audit Highlights & Recommendations`,
+    `## 3. Post-Quantum Readiness & Public-Key Exposure`,
+    '',
+    `- **Quantum Posture Badge:** \`${pqReport.badgeLabel}\` (Score: **${pqReport.score}/100**)`,
+    `- **On-Ledger Classical PubKey Exposed:** ${pqReport.pubKeyExposed ? `YES (${pqReport.exposedOutgoingTxCount} outgoing tx)` : 'NO (Hidden behind SHA-256 + RIPEMD-160 hash)'}`,
+    `- **Local Vault At-Rest Security:** ${VAULT_PQC_POSTURE.atRestCipher} + ${VAULT_PQC_POSTURE.kdf}`,
+    `- **Summary:** ${pqReport.headline}`,
+    ...pqReport.recommendations.map((r) => `- *Action:* ${r}`),
+    '',
+    `## 4. Audit Highlights & Recommendations`,
     '',
     ...findings.map((f) => `- ${f}`),
     '',

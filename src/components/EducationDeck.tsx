@@ -164,7 +164,7 @@ export const EducationDeck: React.FC = () => {
         <div className="flex flex-wrap items-center gap-2 pt-1">
           {[
             { id: 'lessons', label: `Deep Lessons (${EDUCATION_LESSONS.length})`, icon: BookOpen },
-            { id: 'animations', label: 'Interactive Animations (5)', icon: PlayCircle },
+            { id: 'animations', label: 'Interactive Animations (6)', icon: PlayCircle },
             { id: 'reserve-lab', label: 'Interactive Reserve & Fee Lab', icon: Calculator },
             { id: 'glossary', label: `XRPL Glossary (${XRPL_GLOSSARY.length})`, icon: Library },
             { id: 'links', label: `Official Links & Docs (${OFFICIAL_XRPL_LINKS.length})`, icon: Compass },

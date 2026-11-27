@@ -24,6 +24,15 @@ impl KeyAlgorithm {
             KeyAlgorithm::Secp256k1 => "ecdsa-secp256k1",
         }
     }
+
+    /// Crypto-agility hook for future XRPL NIST Post-Quantum signature amendments
+    /// (ML-DSA / Dilithium or SLH-DSA / SPHINCS+). Classical ECC schemes return false.
+    #[allow(dead_code)]
+    pub fn is_post_quantum_signature(&self) -> bool {
+        match self {
+            KeyAlgorithm::Ed25519 | KeyAlgorithm::Secp256k1 => false,
+        }
+    }
 }
 
 pub struct DerivedKeypair {
@@ -212,12 +221,14 @@ mod tests {
         let ed_kp = derive_keypair_from_seed(&ed_seed).expect("ed derive");
         assert!(ed_kp.classic_address.starts_with('r'));
         assert!(ed_kp.public_key_hex.starts_with("ED"));
+        assert!(!ed_kp.algorithm.is_post_quantum_signature());
 
         let secp_seed = generate_family_seed(KeyAlgorithm::Secp256k1);
         assert!(secp_seed.starts_with('s'));
         let secp_kp = derive_keypair_from_seed(&secp_seed).expect("secp derive");
         assert!(secp_kp.classic_address.starts_with('r'));
         assert_eq!(secp_kp.public_key_hex.len(), 66);
+        assert!(!secp_kp.algorithm.is_post_quantum_signature());
 
         let (pub_hex, sig_hex) = sign_canonical_payload(&ed_seed, "53545800AABBCCDD").expect("sign ed");
         assert_eq!(pub_hex, ed_kp.public_key_hex);

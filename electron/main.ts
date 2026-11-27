@@ -11,6 +11,7 @@ import {
   Tray,
 } from 'electron';
 import { autoUpdater } from 'electron-updater';
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { classicAddressToXAddress, xAddressToClassicAddress } from 'xrpl';
@@ -33,7 +34,7 @@ import { resolveRustSidecarBinaryPath, RustVaultSidecarClient } from './rustVaul
 import { WalletVaultService } from './walletVaultService';
 import { XrplStreamManager } from './xrplStream';
 
-const APP_VERSION = '0.2.8-beta';
+const APP_VERSION = '0.2.9-beta';
 const LEDGER_USB_VENDOR_ID = 0x2c97;
 const TREZOR_USB_VENDOR_IDS = new Set([0x1209, 0x534c]);
 
@@ -691,11 +692,15 @@ function registerIpcHandlers(): void {
 
       const rawEncrypted = await fs.readFile(sourceFile, 'utf8');
       const parsedVault = JSON.parse(rawEncrypted) as Record<string, unknown>;
+      const canonicalVaultJson = JSON.stringify(parsedVault);
+      const sha512Integrity = crypto.createHash('sha512').update(canonicalVaultJson, 'utf8').digest('hex');
       const envelope = {
         format: 'xrpl-command-center-encrypted-vault-v1',
         exportedAt: new Date().toISOString(),
         appVersion: APP_VERSION,
         engine,
+        pqcAtRest: 'Argon2id-AES-256-GCM-128bit-PQ',
+        sha512Integrity,
         encryptedVault: parsedVault,
       };
 
@@ -743,6 +748,7 @@ function registerIpcHandlers(): void {
       const envelope = JSON.parse(rawText) as {
         format?: string;
         engine?: 'rust-sidecar' | 'node-fallback';
+        sha512Integrity?: string;
         encryptedVault?: Record<string, unknown>;
       };
 
@@ -755,6 +761,19 @@ function registerIpcHandlers(): void {
           ok: false,
           error: 'Invalid .xrplvault backup file format.',
         };
+      }
+
+      if (typeof envelope.sha512Integrity === 'string' && envelope.sha512Integrity.length === 128) {
+        const expectedHash = crypto
+          .createHash('sha512')
+          .update(JSON.stringify(envelope.encryptedVault), 'utf8')
+          .digest('hex');
+        if (expectedHash !== envelope.sha512Integrity.toLowerCase()) {
+          return {
+            ok: false,
+            error: 'SHA-512 integrity check FAILED — backup file may be corrupted or tampered with.',
+          };
+        }
       }
 
       const userDataDir = app.getPath('userData');

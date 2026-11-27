@@ -41,6 +41,7 @@ import {
   isXAddress,
   resolveSafeMediaUri,
 } from '../shared/betaUtils';
+import { assessQuantumExposure, VAULT_PQC_POSTURE } from '../shared/quantumUtils';
 import type { PathFindQuote, WalletAlgorithm, WalletCheckEntry, WalletGroupTag } from '../shared/types';
 import { computeGroupTotals, WALLET_GROUP_META } from '../shared/v022Utils';
 import {
@@ -215,6 +216,12 @@ export const WalletDeck: React.FC = () => {
   const isCustodial = activeAccount?.kind === 'custodial';
 
   const [activeGroupFilter, setActiveGroupFilter] = useState<'all' | WalletGroupTag>('all');
+  const [showQuantumPanel, setShowQuantumPanel] = useState(false);
+
+  const quantumReport = useMemo(
+    () => (walletPortfolio ? assessQuantumExposure(walletPortfolio) : null),
+    [walletPortfolio]
+  );
 
   const combinedVaultXrp = useMemo(() => {
     let sum = 0;
@@ -1134,6 +1141,20 @@ export const WalletDeck: React.FC = () => {
                           Multi-Sig Quorum {walletPortfolio.signerList.signerQuorum}
                         </span>
                       )}
+                      {quantumReport && (
+                        <button
+                          type="button"
+                          onClick={() => setShowQuantumPanel((v) => !v)}
+                          title="Inspect Post-Quantum Public-Key Exposure & Vault Readiness"
+                          className={`px-2 py-0.5 rounded text-[10px] font-mono border transition-colors ${
+                            !quantumReport.pubKeyExposed
+                              ? 'bg-emerald-500/15 border-emerald-400/40 text-emerald-200 hover:bg-emerald-500/25'
+                              : 'bg-amber-500/15 border-amber-400/40 text-amber-200 hover:bg-amber-500/25'
+                          }`}
+                        >
+                          PQ: {quantumReport.pubKeyExposed ? 'PUBKEY EXPOSED' : 'SHIELDED'} ({quantumReport.score}/100)
+                        </button>
+                      )}
                     </div>
                     <div className="mt-1 flex items-center gap-2 font-mono text-xs text-cyan-300">
                       <span>{activeAccount.address}</span>
@@ -1291,6 +1312,47 @@ export const WalletDeck: React.FC = () => {
                         style={{ width: `${reserveBreakdown.spendablePct}%` }}
                       />
                     </div>
+                  </div>
+                )}
+
+                {/* v0.2.9-beta: Post-Quantum Exposure & Crypto-Agility Drawer */}
+                {showQuantumPanel && quantumReport && (
+                  <div className="rounded-xl bg-slate-950/90 border border-cyan-400/35 p-3.5 space-y-2.5 font-mono text-xs">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <ShieldCheck className={`w-4 h-4 ${quantumReport.pubKeyExposed ? 'text-amber-300' : 'text-emerald-300'}`} />
+                        <span className="text-[11px] uppercase tracking-[0.14em] text-cyan-300 font-semibold">
+                          Post-Quantum Exposure &amp; Vault Readiness ({quantumReport.score}/100)
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNewLabel('PQ Cold Vault (Receive-Only)');
+                          setNewAlgo('ed25519');
+                          setModalMode('create');
+                        }}
+                        className="px-2.5 py-1 rounded-lg bg-emerald-500/20 border border-emerald-400/50 text-[10px] text-emerald-200 hover:bg-emerald-500/30"
+                      >
+                        + Create Fresh PQ-Shielded Cold Vault
+                      </button>
+                    </div>
+                    <div className="text-[11px] text-slate-200">{quantumReport.headline}</div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-[10px]">
+                      <div className="p-2 rounded bg-slate-900/90 border border-slate-800 text-emerald-200">
+                        <div className="text-slate-500 uppercase">Local Vault At Rest</div>
+                        <div>{VAULT_PQC_POSTURE.atRestCipher}</div>
+                      </div>
+                      <div className="p-2 rounded bg-slate-900/90 border border-slate-800 text-cyan-200">
+                        <div className="text-slate-500 uppercase">Backup Seal &amp; Migration</div>
+                        <div>{VAULT_PQC_POSTURE.backupIntegrity}</div>
+                      </div>
+                    </div>
+                    <ul className="space-y-1 text-[10px] text-slate-300 list-disc pl-4">
+                      {quantumReport.recommendations.map((rec, i) => (
+                        <li key={i}>{rec}</li>
+                      ))}
+                    </ul>
                   </div>
                 )}
               </div>

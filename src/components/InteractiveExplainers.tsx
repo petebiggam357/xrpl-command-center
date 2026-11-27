@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   Activity,
   ArrowLeftRight,
+  Cpu,
   Landmark,
   Pause,
   Play,
@@ -10,7 +11,7 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 
-type ExplainerSceneId = 'consensus' | 'fees' | 'clob-amm' | 'vault-lending' | 'docker-node';
+type ExplainerSceneId = 'consensus' | 'fees' | 'clob-amm' | 'vault-lending' | 'docker-node' | 'quantum';
 
 interface ExplainerMeta {
   id: ExplainerSceneId;
@@ -87,6 +88,19 @@ export const INTERACTIVE_EXPLAINERS: ExplainerMeta[] = [
       'online_delete=2000 automatically prunes old ledgers so your SSD stays lean while serving 1ms local WS/RPC.',
     ],
   },
+  {
+    id: 'quantum',
+    title: 'Post-Quantum Shield vs. Shor’s Algorithm',
+    badge: 'PQC Ready',
+    icon: Cpu,
+    summary:
+      'Toggle between a Receive-Only Cold Vault (PubKey hidden behind SHA-256/RIPEMD-160), a Spent Classical Account, and XRPL’s future NIST ML-DSA / SLH-DSA RegularKey rotation.',
+    keyPoints: [
+      'AES-256-GCM + Argon2id (our Rust Vault at rest) already keeps 128-bit security against Grover’s quantum algorithm.',
+      'An unspent XRPL r-address never reveals its raw public key on-ledger — Shor’s algorithm has nothing to attack!',
+      'XRPL’s native SetRegularKey lets accounts rotate to future NIST ML-DSA / SLH-DSA keys without changing their r-address.',
+    ],
+  },
 ];
 
 export const InteractiveExplainers: React.FC = () => {
@@ -94,6 +108,7 @@ export const InteractiveExplainers: React.FC = () => {
   const [playing, setPlaying] = useState(true);
   const [feeLoadMultiplier, setFeeLoadMultiplier] = useState(1);
   const [defaultShockTriggered, setDefaultShockTriggered] = useState(false);
+  const [pqMode, setPqMode] = useState<'shielded' | 'exposed' | 'pq-rotated'>('shielded');
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const simTimeRef = useRef(0);
@@ -474,6 +489,97 @@ export const InteractiveExplainers: React.FC = () => {
           w * 0.5,
           62
         );
+      } else if (scene === 'quantum') {
+        const attackerX = w * 0.16;
+        const shieldX = w * 0.5;
+        const vaultX = w * 0.83;
+        const cy = h * 0.54;
+
+        // Quantum beam from attacker toward shield/vault
+        const beamBlocked = pqMode !== 'exposed';
+        for (let i = 0; i < 6; i++) {
+          const p = (t * 0.65 + i * 0.16) % 1;
+          const endX = beamBlocked ? shieldX - 24 : vaultX - 66;
+          const px = attackerX + 64 + (endX - (attackerX + 64)) * p;
+          const py = cy + Math.sin(p * Math.PI * 3 + i) * 8;
+          ctx.beginPath();
+          ctx.arc(px, py, 4.5, 0, Math.PI * 2);
+          ctx.fillStyle = beamBlocked ? '#fbbf24' : '#fb7185';
+          ctx.fill();
+        }
+
+        // Attacker Node
+        ctx.fillStyle = '#1e1028';
+        ctx.strokeStyle = '#fb7185';
+        ctx.lineWidth = 2;
+        ctx.fillRect(attackerX - 64, cy - 42, 128, 84);
+        ctx.strokeRect(attackerX - 64, cy - 42, 128, 84);
+        ctx.fillStyle = '#fda4af';
+        ctx.font = 'bold 11px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('FUTURE CRQC', attackerX, cy - 8);
+        ctx.fillStyle = '#cbd5e1';
+        ctx.font = '10px monospace';
+        ctx.fillText("Shor's Algorithm", attackerX, cy + 12);
+
+        // Middle Shield / Key Layer
+        ctx.beginPath();
+        ctx.arc(shieldX, cy, 52, 0, Math.PI * 2);
+        ctx.fillStyle =
+          pqMode === 'exposed'
+            ? 'rgba(244, 63, 94, 0.15)'
+            : pqMode === 'pq-rotated'
+              ? 'rgba(34, 211, 238, 0.16)'
+              : 'rgba(16, 185, 129, 0.18)';
+        ctx.fill();
+        ctx.strokeStyle =
+          pqMode === 'exposed' ? '#fb7185' : pqMode === 'pq-rotated' ? '#22d3ee' : '#34d399';
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
+
+        ctx.fillStyle = '#f8fafc';
+        ctx.font = 'bold 11px monospace';
+        ctx.fillText(
+          pqMode === 'shielded' ? 'HASH SHIELD' : pqMode === 'pq-rotated' ? 'ML-DSA / PQ' : 'EXPOSED ECC',
+          shieldX,
+          cy - 4
+        );
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '9.5px monospace';
+        ctx.fillText(
+          pqMode === 'shielded'
+            ? 'SHA256+RIPEMD160'
+            : pqMode === 'pq-rotated'
+              ? 'SetRegularKey'
+              : 'PubKey On-Ledger',
+          shieldX,
+          cy + 14
+        );
+
+        // Vault Node
+        ctx.fillStyle = '#0b1325';
+        ctx.strokeStyle = beamBlocked ? '#34d399' : '#fbbf24';
+        ctx.lineWidth = 2;
+        ctx.fillRect(vaultX - 66, cy - 42, 132, 84);
+        ctx.strokeRect(vaultX - 66, cy - 42, 132, 84);
+        ctx.fillStyle = beamBlocked ? '#6ee7b7' : '#fde68a';
+        ctx.font = 'bold 11px monospace';
+        ctx.fillText('XRPL ACCOUNT', vaultX, cy - 8);
+        ctx.fillStyle = '#cbd5e1';
+        ctx.font = '10px monospace';
+        ctx.fillText(beamBlocked ? 'PRIVATE KEY SAFE' : 'SWEEP / ROTATE', vaultX, cy + 12);
+
+        ctx.fillStyle = beamBlocked ? '#6ee7b7' : '#fda4af';
+        ctx.font = 'bold 12px monospace';
+        ctx.fillText(
+          pqMode === 'shielded'
+            ? 'RECEIVE-ONLY COLD VAULT: Raw public key is hidden behind AccountID hash — Shor’s algorithm is blocked!'
+            : pqMode === 'pq-rotated'
+              ? 'CRYPTO-AGILE MIGRATION: XRPL SetRegularKey swaps to NIST ML-DSA / SLH-DSA while keeping your r-address!'
+              : 'SPENT CLASSICAL ACCOUNT: Outgoing tx exposed SigningPubKey — sweep HODL funds to a fresh cold vault.',
+          w * 0.5,
+          44
+        );
       }
 
       ctx.restore();
@@ -482,12 +588,12 @@ export const InteractiveExplainers: React.FC = () => {
 
     rafId = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(rafId);
-  }, [scene, playing, feeLoadMultiplier, defaultShockTriggered]);
+  }, [scene, playing, feeLoadMultiplier, defaultShockTriggered, pqMode]);
 
   return (
     <div className="space-y-4">
       {/* Scene Selector Pills */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-2">
         {INTERACTIVE_EXPLAINERS.map((item) => {
           const Icon = item.icon;
           const active = scene === item.id;
@@ -547,6 +653,30 @@ export const InteractiveExplainers: React.FC = () => {
               >
                 {defaultShockTriggered ? 'Restore Normal Yield' : 'Trigger Default Shock!'}
               </button>
+            )}
+            {scene === 'quantum' && (
+              <div className="flex items-center gap-1 font-mono text-[10px]">
+                {(
+                  [
+                    { id: 'shielded', label: 'Cold Vault' },
+                    { id: 'exposed', label: 'Spent ECC' },
+                    { id: 'pq-rotated', label: 'PQ RegularKey' },
+                  ] as const
+                ).map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => setPqMode(m.id)}
+                    className={`px-2 py-1 rounded-lg border ${
+                      pqMode === m.id
+                        ? 'bg-cyan-500/20 border-cyan-400 text-cyan-200'
+                        : 'bg-slate-950 border-slate-700 text-slate-400'
+                    }`}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
             )}
             <button
               type="button"

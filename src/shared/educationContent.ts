@@ -358,6 +358,37 @@ export const EDUCATION_LESSONS: EducationLesson[] = [
     ],
   },
   {
+    id: 'post-quantum-cryptography-xrpl',
+    category: 'security',
+    level: 'Advanced',
+    readMinutes: 5,
+    title: 'Post-Quantum Cryptography (PQC) on XRPL & Quantum-Shielded Cold Storage',
+    summary:
+      'Separate fact from FUD: why AES-256 + Argon2id and unspent XRPL addresses are already shielded against Shor’s algorithm, and how SetRegularKey enables seamless NIST ML-DSA / SLH-DSA migration.',
+    appTab: 'wallets',
+    appCta: 'Inspect Quantum Exposure in Wallets',
+    keyTakeaways: [
+      'AES-256-GCM + Argon2id (our Rust Vault at rest) retains 128-bit post-quantum security against Grover’s algorithm.',
+      'An XRPL r-address is a SHA-256 + RIPEMD-160 hash of the public key — until you sign your first outgoing transaction, your raw public key is hidden on-ledger.',
+      'Unlike UTXO chains, XRPL’s native SetRegularKey + DisableMaster allows rotating to future NIST ML-DSA (Dilithium) or SLH-DSA (SPHINCS+) keys while keeping your exact r-address.',
+    ],
+    sections: [
+      {
+        heading: 'Immediate Best Practice: Receive-Only PQ-Shielded Cold Vaults',
+        body: 'In Wallets & DeFi, check the live PQ Exposure badge next to your wallet. Keep long-term HODL balances in a fresh, unspent receive-only address ("PQ-SHIELDED") so no classical Ed25519/secp256k1 SigningPubKey is ever published on-ledger.',
+      },
+      {
+        heading: 'Crypto-Agile Rust Vault & SHA-512 Backups',
+        body: 'Our Rust sidecar isolates all signing in zeroized memory and seals .xrplvault backups with a SHA-512 integrity hash, while our KeyAlgorithm trait is structured to adopt XRPL’s upcoming Post-Quantum signature amendment with zero vault breakage.',
+      },
+    ],
+    proTip:
+      'Open XRPL Academy → Interactive Animations → "Post-Quantum Shield vs. Shor’s Algorithm" to visualize hash-shielded cold vaults vs. exposed keys, and export a Security Audit (.md) from Wallets & DeFi for your full PQ score!',
+    links: [
+      { label: 'NIST Post-Quantum Cryptography (FIPS 204/205)', url: 'https://csrc.nist.gov/projects/post-quantum-cryptography' },
+    ],
+  },
+  {
     id: 'running-your-own-rippled-node',
     category: 'nodeops',
     level: 'Advanced',

@@ -2,6 +2,16 @@
 
 All notable changes to **XRPL Command Center** are documented in this file.
 
+## [0.2.9-beta] - 2026-11-27
+
+### Added
+- **Post-Quantum Cryptography (PQC) Exposure Scanner & Crypto-Agile Security Suite:**
+  - Added pure Post-Quantum exposure engine `src/shared/quantumUtils.ts` (`assessQuantumExposure`) detecting whether an XRPL account's classical `SigningPubKey` is still hidden behind `SHA-256 + RIPEMD-160` (`PQ-SHIELDED`) or has been revealed by an outgoing signed transaction (`PUBKEY EXPOSED`), with live score (`0–100`) and tailored migration recommendations.
+  - Added live **PQ Exposure Badge & Readiness Drawer** inside `WalletDeck` with a 1-click **`+ Create Fresh PQ-Shielded Cold Vault`** shortcut, and embedded the full **Post-Quantum Readiness & Public-Key Exposure** section into exported **Account Security & Reserve Audit (`.md`)** reports.
+  - Added **SHA-512 cryptographic integrity seals (`sha512Integrity`)** to `.xrplvault` encrypted backup export/import in `electron/main.ts` (tamper-evident while remaining backward-compatible with earlier `.xrplvault` files), and added `is_post_quantum_signature()` crypto-agility hook to `rust-vault/src/xrpl_crypto.rs`.
+  - Added **XRPL Academy Lesson #12** (*Post-Quantum Cryptography on XRPL & Quantum-Shielded Cold Storage*) and a **6th Interactive 60fps Animation** (*Post-Quantum Shield vs. Shor's Algorithm* with interactive `Cold Vault` / `Spent ECC` / `PQ RegularKey` toggle).
+- **Verification:** Added `tests/quantumReadiness.test.ts` (6 new unit tests; **100/100** total Vitest tests passing across 18 suites + all Rust vault tests passing).
+
 ## [0.2.8-beta] - 2026-11-27
 
 ### Added
