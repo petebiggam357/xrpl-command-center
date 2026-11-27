@@ -2,6 +2,20 @@
 
 All notable changes to **XRPL Command Center** are documented in this file.
 
+## [0.2.8-beta] - 2026-11-27
+
+### Added
+- **5 Interactive 60fps Visual Protocol Explainers (`XRPL Academy → Interactive Animations`):**
+  - Added `InteractiveExplainers.tsx` with Play/Pause, Restart, and interactive stress-test controls covering:
+    1. **Consensus & 80% UNL Quorum** (`OPEN → ESTABLISH → 80% QUORUM → VALIDATED`)
+    2. **Fee Escalation & Open-Ledger Queue** (interactive `1x–1000x` load slider + **Try 945x Spike!** preset)
+    3. **CLOB DEX + XLS-30 AMM Auto-Bridging** (hybrid liquidity particle flow)
+    4. **XLS-65 Single Asset Vaults & XLS-66 First-Loss Cover** (interactive **Trigger Default Shock!** waterfall demo)
+    5. **Local Docker Node Sync & Stock Mode** (P2P mesh, dual dUNL, NuDB snapshot & `full` state)
+- **Live Screenshot Gallery, Animated README Tour GIF & 1080p Launch Promo Video:**
+  - Added automated Electron screenshot capture pipeline (`scripts/capture-screenshots.mjs`) capturing 8 real `1440×900` module screenshots in `docs/media/screenshots/` (with clean showcase data and zero personal keys/PII).
+  - Added `scripts/build-explainer-media.py` generating `docs/media/xrpl-command-center-promo.mp4` (1920×1080 30fps launch video with smooth cross-fades & callout lower-thirds) and `docs/media/xrpl-command-center-tour.gif` embedded directly in `README.md`.
+
 ## [0.2.7-beta] - 2026-11-26
 
 ### Added & Improved

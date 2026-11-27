@@ -10,6 +10,7 @@ import {
   GraduationCap,
   Library,
   Lightbulb,
+  PlayCircle,
   Search,
   Sparkles,
 } from 'lucide-react';
@@ -22,8 +23,9 @@ import {
   type EducationCategory,
 } from '../shared/educationContent';
 import { useCommandStore } from '../store/useCommandStore';
+import { InteractiveExplainers } from './InteractiveExplainers';
 
-type AcademySubTab = 'lessons' | 'reserve-lab' | 'glossary' | 'links';
+type AcademySubTab = 'lessons' | 'animations' | 'reserve-lab' | 'glossary' | 'links';
 
 const COMPLETED_STORAGE_KEY = 'xrpl-cc-academy-completed-v1';
 
@@ -162,6 +164,7 @@ export const EducationDeck: React.FC = () => {
         <div className="flex flex-wrap items-center gap-2 pt-1">
           {[
             { id: 'lessons', label: `Deep Lessons (${EDUCATION_LESSONS.length})`, icon: BookOpen },
+            { id: 'animations', label: 'Interactive Animations (5)', icon: PlayCircle },
             { id: 'reserve-lab', label: 'Interactive Reserve & Fee Lab', icon: Calculator },
             { id: 'glossary', label: `XRPL Glossary (${XRPL_GLOSSARY.length})`, icon: Library },
             { id: 'links', label: `Official Links & Docs (${OFFICIAL_XRPL_LINKS.length})`, icon: Compass },
@@ -389,6 +392,9 @@ export const EducationDeck: React.FC = () => {
           )}
         </div>
       )}
+
+      {/* VIEW 1B: INTERACTIVE VISUAL EXPLAINER ANIMATIONS */}
+      {subTab === 'animations' && <InteractiveExplainers />}
 
       {/* VIEW 2: INTERACTIVE RESERVE & FEE LAB */}
       {subTab === 'reserve-lab' && (
