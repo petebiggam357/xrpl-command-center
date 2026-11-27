@@ -1,3 +1,12 @@
+import type {
+  ChartTimeframe,
+  MarketOhlcRequest,
+  MarketOhlcResponse,
+  OhlcCandle,
+} from './chartIndicators';
+
+export type { ChartTimeframe, MarketOhlcRequest, MarketOhlcResponse, OhlcCandle };
+
 export type NetworkId = 'mainnet' | 'testnet' | 'devnet' | 'custom';
 
 export type NavTab =
@@ -1024,6 +1033,7 @@ export interface XrplDesktopApi {
 
   // v0.1.0-beta: Live Prices, Amendment Voting, X-Address Codec & Encrypted Vault Backups
   fetchMarketPrices: () => Promise<MarketPriceSnapshot>;
+  fetchMarketOhlc: (req: MarketOhlcRequest) => Promise<MarketOhlcResponse>;
   fetchAmendments: () => Promise<{ amendments: AmendmentVoteRecord[]; source: string; fetchedAt: number }>;
   decodeXAddress: (xAddress: string) => Promise<XAddressDecodeResult>;
   encodeXAddress: (classicAddress: string, tag?: number | null, isTestnet?: boolean) => Promise<XAddressEncodeResult>;

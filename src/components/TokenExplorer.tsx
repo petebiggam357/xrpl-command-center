@@ -16,6 +16,7 @@ import { computeClobVsAmmSpread } from '../shared/v023Utils';
 import { simulateAmmLpYield } from '../shared/v024Utils';
 import { formatCompactNumber, shortenAddress } from '../shared/xrplCodec';
 import { useCommandStore } from '../store/useCommandStore';
+import { DexChartPanel } from './DexChartPanel';
 import { DexDepthCanvas } from './DexDepthCanvas';
 
 export const TokenExplorer: React.FC = () => {
@@ -236,6 +237,14 @@ export const TokenExplorer: React.FC = () => {
           })}
         </div>
       </div>
+
+      {/* Full-Width Pro OHLCV Candlestick Chart & Technical Indicators */}
+      <DexChartPanel
+        selectedToken={selectedToken}
+        tokenOnLedgerReport={tokenOnLedgerReport}
+        priceAlerts={priceAlerts}
+        xrpUsdSpot={marketPrice.xrpUsd}
+      />
 
       {/* Main Split: Directory Table + Authoritative On-Ledger Inspector */}
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">

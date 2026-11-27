@@ -1,10 +1,14 @@
 import type {
   AmendmentVoteRecord,
+  ChartTimeframe,
   DidResolutionReport,
   InspectorResult,
   LiveTransaction,
+  MarketOhlcRequest,
+  MarketOhlcResponse,
   MarketPriceSnapshot,
   NetworkId,
+  OhlcCandle,
   OracleAggregateReport,
   OrderbookLevel,
   TokenOnLedgerReport,
@@ -135,7 +139,7 @@ async function fetchJsonWithTimeout<T>(url: string, timeoutMs = 10_000): Promise
       signal: controller.signal,
       headers: {
         Accept: 'application/json',
-        'User-Agent': 'XRPL-Command-Center/0.2.9-beta',
+        'User-Agent': 'XRPL-Command-Center/0.2.10-beta',
       },
     });
     if (!res.ok) {
@@ -154,6 +158,7 @@ export class DirectoryService {
   >();
   private tokenCache = new Map<string, CacheSlot<{ tokens: TokenRecord[]; source: string }>>();
   private priceCache: CacheSlot<MarketPriceSnapshot> | null = null;
+  private ohlcCache = new Map<string, CacheSlot<MarketOhlcResponse>>();
   private amendmentCache: CacheSlot<{ amendments: AmendmentVoteRecord[]; source: string }> | null = null;
 
   public async fetchMarketPrices(): Promise<MarketPriceSnapshot> {
@@ -215,6 +220,223 @@ export class DirectoryService {
         fetchedAt: Date.now(),
       }
     );
+  }
+
+  public async fetchMarketOhlc(req: MarketOhlcRequest): Promise<MarketOhlcResponse> {
+    const tf: ChartTimeframe =
+      req.timeframe === '15m' || req.timeframe === '1h' || req.timeframe === '4h' || req.timeframe === '1d'
+        ? req.timeframe
+        : '1h';
+    const bars = Math.max(30, Math.min(240, Number(req.bars ?? 160) || 160));
+    const pairType = req.pairType === 'token-xrp' && req.issuer ? 'token-xrp' : 'xrp-usd';
+    const currencyRaw = (req.currencyRaw ?? req.currency ?? '').trim();
+    const currencyDisplay = decodeCurrencyCode(currencyRaw || req.currency || 'TOKEN');
+    const issuer = (req.issuer ?? '').trim();
+
+    const cacheKey = `${pairType}:${currencyRaw}:${issuer}:${tf}:${bars}`;
+    const cached = this.ohlcCache.get(cacheKey);
+    if (cached && Date.now() - cached.fetchedAt < 45_000) {
+      return cached.data;
+    }
+
+    const saveAndReturn = (resp: MarketOhlcResponse): MarketOhlcResponse => {
+      if (resp.candles.length > 0) {
+        this.ohlcCache.set(cacheKey, { fetchedAt: Date.now(), data: resp });
+      }
+      return resp;
+    };
+
+    const sanitizeCandles = (rawList: OhlcCandle[]): OhlcCandle[] => {
+      const cleaned = rawList
+        .filter(
+          (c) =>
+            Number.isFinite(c.time) &&
+            c.time > 0 &&
+            Number.isFinite(c.open) &&
+            Number.isFinite(c.high) &&
+            Number.isFinite(c.low) &&
+            Number.isFinite(c.close) &&
+            c.open > 0 &&
+            c.close > 0 &&
+            c.high >= c.low
+        )
+        .sort((a, b) => a.time - b.time);
+      // Deduplicate identical timestamps (keep latest)
+      const deduped: OhlcCandle[] = [];
+      for (const c of cleaned) {
+        if (deduped.length > 0 && deduped[deduped.length - 1].time === c.time) {
+          deduped[deduped.length - 1] = c;
+        } else {
+          deduped.push(c);
+        }
+      }
+      return deduped.slice(-bars);
+    };
+
+    if (pairType === 'xrp-usd') {
+      const krakenIntervalMap: Record<ChartTimeframe, number> = {
+        '15m': 15,
+        '1h': 60,
+        '4h': 240,
+        '1d': 1440,
+      };
+      const coinbaseGranularityMap: Record<ChartTimeframe, number> = {
+        '15m': 900,
+        '1h': 3600,
+        '4h': 21600,
+        '1d': 86400,
+      };
+
+      // 1) Primary: Kraken Public OHLC (global, no API key required)
+      try {
+        const kRes = await fetchJsonWithTimeout<{
+          error?: string[];
+          result?: Record<string, unknown>;
+        }>(
+          `https://api.kraken.com/0/public/OHLC?pair=XRPUSD&interval=${krakenIntervalMap[tf]}`,
+          9_000
+        );
+        if (kRes?.result) {
+          const seriesKey = Object.keys(kRes.result).find((k) => k !== 'last');
+          const rows = seriesKey && Array.isArray(kRes.result[seriesKey]) ? (kRes.result[seriesKey] as unknown[][]) : [];
+          const parsed: OhlcCandle[] = rows.map((r) => ({
+            time: Number(r[0]),
+            open: Number(r[1]),
+            high: Number(r[2]),
+            low: Number(r[3]),
+            close: Number(r[4]),
+            volume: Number(r[6] ?? 0) || 0,
+          }));
+          const candles = sanitizeCandles(parsed);
+          if (candles.length > 0) {
+            return saveAndReturn({
+              pairLabel: 'XRP / USD',
+              quoteSymbol: 'USD',
+              timeframe: tf,
+              source: 'Kraken OHLC',
+              fetchedAt: Date.now(),
+              candles,
+            });
+          }
+        }
+      } catch {
+        // fall through to Coinbase Exchange
+      }
+
+      // 2) Fallback: Coinbase Exchange Public Candles
+      try {
+        const cbRows = await fetchJsonWithTimeout<number[][]>(
+          `https://api.exchange.coinbase.com/products/XRP-USD/candles?granularity=${coinbaseGranularityMap[tf]}`,
+          9_000
+        );
+        if (Array.isArray(cbRows) && cbRows.length > 0) {
+          // Coinbase format: [time, low, high, open, close, volume]
+          const parsed: OhlcCandle[] = cbRows.map((r) => ({
+            time: Number(r[0]),
+            low: Number(r[1]),
+            high: Number(r[2]),
+            open: Number(r[3]),
+            close: Number(r[4]),
+            volume: Number(r[5] ?? 0) || 0,
+          }));
+          const candles = sanitizeCandles(parsed);
+          if (candles.length > 0) {
+            return saveAndReturn({
+              pairLabel: 'XRP / USD',
+              quoteSymbol: 'USD',
+              timeframe: tf,
+              source: 'Coinbase OHLC',
+              fetchedAt: Date.now(),
+              candles,
+            });
+          }
+        }
+      } catch {
+        // ignore
+      }
+
+      return {
+        pairLabel: 'XRP / USD',
+        quoteSymbol: 'USD',
+        timeframe: tf,
+        source: 'offline',
+        fetchedAt: Date.now(),
+        candles: [],
+        error: 'Unable to reach public XRP/USD OHLC feeds (Kraken / Coinbase).',
+      };
+    }
+
+    // Native XRPL DEX Token / XRP candles via OnTheDEX Public API
+    const otdIntervalMap: Record<ChartTimeframe, number> = {
+      '15m': 900,
+      '1h': 3600,
+      '4h': 14400,
+      '1d': 86400,
+    };
+
+    const baseCandidates = Array.from(
+      new Set(
+        [
+          currencyRaw ? `${currencyRaw}.${issuer}` : '',
+          currencyDisplay ? `${currencyDisplay}.${issuer}` : '',
+        ].filter(Boolean)
+      )
+    );
+
+    for (const baseParam of baseCandidates) {
+      try {
+        const url = `https://api.onthedex.live/public/v1/ohlc?base=${encodeURIComponent(baseParam)}&quote=XRP&interval=${otdIntervalMap[tf]}&bars=${bars}`;
+        const otd = await fetchJsonWithTimeout<{
+          error?: string | null;
+          data?: {
+            ohlc?: Array<{
+              t?: number;
+              o?: number;
+              h?: number;
+              l?: number;
+              c?: number;
+              v?: number;
+              V?: number;
+            }>;
+          };
+        }>(url, 10_000);
+
+        const rawOhlc = otd?.data?.ohlc ?? [];
+        if (Array.isArray(rawOhlc) && rawOhlc.length > 0) {
+          const parsed: OhlcCandle[] = rawOhlc.map((b) => ({
+            time: Number(b.t),
+            open: Number(b.o),
+            high: Number(b.h),
+            low: Number(b.l),
+            close: Number(b.c),
+            volume: Number(b.V ?? b.v ?? 0) || 0,
+          }));
+          const candles = sanitizeCandles(parsed);
+          if (candles.length > 0) {
+            return saveAndReturn({
+              pairLabel: `${currencyDisplay} / XRP`,
+              quoteSymbol: 'XRP',
+              timeframe: tf,
+              source: 'OnTheDEX Live',
+              fetchedAt: Date.now(),
+              candles,
+            });
+          }
+        }
+      } catch {
+        // try next candidate
+      }
+    }
+
+    return {
+      pairLabel: `${currencyDisplay} / XRP`,
+      quoteSymbol: 'XRP',
+      timeframe: tf,
+      source: 'onthedex-empty',
+      fetchedAt: Date.now(),
+      candles: [],
+      error: `No recent XRPL DEX OHLC history returned for ${currencyDisplay}/XRP on this timeframe.`,
+    };
   }
 
   public async fetchAmendments(

@@ -336,7 +336,7 @@ export function getXrplBridge(): Omit<XrplDesktopApi, 'isElectron' | 'platform' 
   return {
     isElectron: false,
     platform: 'web-preview',
-    version: '0.0.3-alpha',
+    version: '0.2.10-beta',
     connectNetwork: (n, c) => fb.connectNetwork(n, c),
     getStreamStatus: () => fb.getStreamStatus(),
     rpcRequest: (cmd, params) => fb.rpcRequest(cmd, params),
@@ -461,19 +461,19 @@ export function getXrplBridge(): Omit<XrplDesktopApi, 'isElectron' | 'platform' 
     systemGetTrayUpdaterState: async (): Promise<TrayAndUpdaterSettings> => ({
       minimizeToTray: false,
       nodeWatchdogEnabled: false,
-      currentVersion: '0.2.9-beta',
+      currentVersion: '0.2.10-beta',
       updateState: 'idle',
     }),
     systemUpdateTraySettings: async () => ({
       minimizeToTray: false,
       nodeWatchdogEnabled: false,
-      currentVersion: '0.2.9-beta',
+      currentVersion: '0.2.10-beta',
       updateState: 'idle',
     }),
     systemCheckForUpdates: async () => ({
       minimizeToTray: false,
       nodeWatchdogEnabled: false,
-      currentVersion: '0.2.9-beta',
+      currentVersion: '0.2.10-beta',
       updateState: 'idle',
     }),
 
@@ -482,6 +482,15 @@ export function getXrplBridge(): Omit<XrplDesktopApi, 'isElectron' | 'platform' 
       change24hPct: null,
       source: 'browser-preview',
       fetchedAt: Date.now(),
+    }),
+    fetchMarketOhlc: async (req) => ({
+      pairLabel: req.pairType === 'token-xrp' ? `${req.currency ?? 'TOKEN'} / XRP` : 'XRP / USD',
+      quoteSymbol: req.pairType === 'token-xrp' ? 'XRP' : 'USD',
+      timeframe: req.timeframe,
+      source: 'browser-preview',
+      fetchedAt: Date.now(),
+      candles: [],
+      error: 'Live OHLCV feed requires Electron desktop runtime.',
     }),
     fetchAmendments: async () => ({
       amendments: [],

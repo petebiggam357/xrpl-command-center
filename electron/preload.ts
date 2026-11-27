@@ -6,6 +6,7 @@ import type {
   DockerProvisionRequest,
   LedgerSnapshot,
   LiveTransaction,
+  MarketOhlcRequest,
   NetworkId,
   NodeConnectionConfig,
   StreamStatus,
@@ -26,7 +27,7 @@ function subscribeChannel<T>(channel: string, cb: (payload: T) => void): () => v
 const api: XrplDesktopApi = {
   isElectron: true,
   platform: process.platform,
-  version: '0.2.9-beta',
+  version: '0.2.10-beta',
   connectNetwork: (networkId: NetworkId, customEndpoint?: string) =>
     ipcRenderer.invoke('xrpl:connect', networkId, customEndpoint),
   getStreamStatus: () => ipcRenderer.invoke('xrpl:getStatus'),
@@ -118,6 +119,7 @@ const api: XrplDesktopApi = {
 
   // v0.1.0-beta: Live Prices, Amendment Voting, X-Address Codec & Encrypted Vault Backups
   fetchMarketPrices: () => ipcRenderer.invoke('market:fetchPrices'),
+  fetchMarketOhlc: (req: MarketOhlcRequest) => ipcRenderer.invoke('market:fetchOhlc', req),
   fetchAmendments: () => ipcRenderer.invoke('xrpl:fetchAmendments'),
   decodeXAddress: (xAddress: string) => ipcRenderer.invoke('wallet:decodeXAddress', xAddress),
   encodeXAddress: (classicAddress: string, tag?: number | null, isTestnet?: boolean) =>

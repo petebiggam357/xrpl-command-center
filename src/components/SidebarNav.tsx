@@ -36,7 +36,7 @@ const NAV_GROUPS: Array<{
       { id: 'wallets', label: 'Wallets & DeFi', subtitle: 'Vault, Ledger, PathSwap', icon: Wallet },
       { id: 'globe', label: '3D Globe', subtitle: 'Holographic Consensus', icon: Globe2 },
       { id: 'validators', label: 'Validators', subtitle: 'UNL & Quorum Health', icon: ShieldCheck },
-      { id: 'tokens', label: 'Tokens & DEX', subtitle: 'Depth, Spread & AMM IL', icon: Coins },
+      { id: 'tokens', label: 'Tokens & DEX', subtitle: 'Charts, Indicators & AMM', icon: Coins },
     ],
   },
   {

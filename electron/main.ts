@@ -19,6 +19,7 @@ import type {
   AssetSpec,
   DesktopNotificationPayload,
   DockerProvisionRequest,
+  MarketOhlcRequest,
   NetworkId,
   NodeConnectionConfig,
   TrayAndUpdaterSettings,
@@ -34,7 +35,7 @@ import { resolveRustSidecarBinaryPath, RustVaultSidecarClient } from './rustVaul
 import { WalletVaultService } from './walletVaultService';
 import { XrplStreamManager } from './xrplStream';
 
-const APP_VERSION = '0.2.9-beta';
+const APP_VERSION = '0.2.10-beta';
 const LEDGER_USB_VENDOR_ID = 0x2c97;
 const TREZOR_USB_VENDOR_IDS = new Set([0x1209, 0x534c]);
 
@@ -630,6 +631,9 @@ function registerIpcHandlers(): void {
 
   // v0.1.0-beta: Live Market Prices, Amendment Voting, X-Address Codec & Encrypted Vault Backups
   ipcMain.handle('market:fetchPrices', () => directoryService.fetchMarketPrices());
+  ipcMain.handle('market:fetchOhlc', (_evt, req: MarketOhlcRequest) =>
+    directoryService.fetchMarketOhlc(req)
+  );
   ipcMain.handle('xrpl:fetchAmendments', () => directoryService.fetchAmendments(streamManager));
 
   ipcMain.handle('wallet:decodeXAddress', (_evt, xAddr: string) => {

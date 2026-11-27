@@ -2,6 +2,15 @@
 
 All notable changes to **XRPL Command Center** are documented in this file.
 
+## [0.2.10-beta] - 2026-11-27
+
+### Added
+- **Pro DEX OHLCV Charts & Technical Indicators (`Tokens & DEX`):**
+  - Added pure technical analysis engine `src/shared/chartIndicators.ts` computing **SMA (20)**, **EMA (9 / 21 / 50)**, **Bollinger Bands (20, 2σ)**, **VWAP**, **Wilder RSI (14)**, **MACD (12, 26, 9)**, **Heikin-Ashi** candle conversion, and composite technical bias summaries.
+  - Added live main-process OHLCV fetcher (`DirectoryService.fetchMarketOhlc` + `market:fetchOhlc` IPC) sourcing **`XRP / USD`** candles from **Kraken Public OHLC** (with **Coinbase Exchange** fallback) and native XRPL DEX **`<TOKEN> / XRP`** candles from **OnTheDEX Public API**, cached for 45 seconds.
+  - Built responsive HiDPI Canvas2D trading terminal [`DexChartPanel.tsx`](src/components/DexChartPanel.tsx) mounted full-width inside `TokenExplorer`: instant **`XRP / USD` ↔ `<TOKEN> / XRP`** pair switching, **Candles / Heikin-Ashi / Area** modes, `15m` / `1H` / `4H` / `1D` timeframes, toggleable indicator overlays & synchronized **Volume**, **RSI(14)**, and **MACD(12,26,9)** sub-panes, interactive crosshair, scroll-to-zoom, drag-to-pan, and live plotted **XRP Price Alert** lines.
+- **Verification:** Added `tests/chartIndicators.test.ts` (8 new unit tests; **108/108** total Vitest tests passing across 19 suites).
+
 ## [0.2.9-beta] - 2026-11-27
 
 ### Added
